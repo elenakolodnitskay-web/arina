@@ -27,6 +27,13 @@ def allowed_user(monkeypatch):
     monkeypatch.setattr(settings, "allowed_user_ids", "111")
 
 
+@pytest.fixture(autouse=True)
+def no_real_dialog_summary(monkeypatch):
+    mock = AsyncMock()
+    monkeypatch.setattr(free_chat, "record_message", mock)
+    return mock
+
+
 def make_message_update(telegram_id: int, text: str):
     update = MagicMock()
     update.effective_user.id = telegram_id
@@ -57,10 +64,14 @@ async def test_handle_message_prompts_start_for_unonboarded_user(db_session_fact
 
 
 @pytest.mark.asyncio
-async def test_handle_message_saves_classified_note(db_session_factory, allowed_user, monkeypatch):
+async def test_handle_message_saves_classified_note(
+    db_session_factory, allowed_user, no_real_dialog_summary, monkeypatch
+):
     with db_session_factory() as session:
-        session.add(User(telegram_id=111, onboarding_completed=True))
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
         session.commit()
+        user_id = user.id
 
     monkeypatch.setattr(
         free_chat,
@@ -75,6 +86,8 @@ async def test_handle_message_saves_classified_note(db_session_factory, allowed_
         note = session.query(Note).one()
         assert note.content == "отправить отчёт клиенту"
         assert note.context == Context.work
+
+    no_real_dialog_summary.assert_awaited_once_with(user_id, Context.work)
 
     update.message.reply_text.assert_awaited_once()
     assert "рабочее" in update.message.reply_text.await_args.args[0]

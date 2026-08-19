@@ -2,6 +2,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from config import settings
+from core.dialog_summary import record_message
 from db.models import Context, Note, User
 from db.session import SessionLocal
 from llm.classify import classify_message
@@ -36,7 +37,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         session.add(note)
         session.commit()
         note_id = note.id
+        user_id = user.id
         label = CONTEXT_LABELS[result.context]
+
+    await record_message(user_id, result.context)
 
     keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton("Это не туда", callback_data=f"toggle_context:{note_id}")]]
