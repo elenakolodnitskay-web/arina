@@ -2,11 +2,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from config import settings
-from core.dialog_summary import record_message
+from core.dialog_summary import get_summary, record_message
 from db.models import Context, Note, User
 from db.session import SessionLocal
 from llm.classify import classify_message
 from llm.client import LLMUnavailableError
+from llm.reply import generate_reply
 
 CONTEXT_LABELS = {Context.work: "рабочее", Context.personal: "личное"}
 
@@ -29,6 +30,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         try:
             result = await classify_message(update.message.text)
+            summary = get_summary(user.id, result.context)
+            reply_text = await generate_reply(update.message.text, result.context, summary)
         except LLMUnavailableError as exc:
             await update.message.reply_text(str(exc))
             return
@@ -38,14 +41,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         session.commit()
         note_id = note.id
         user_id = user.id
-        label = CONTEXT_LABELS[result.context]
 
     await record_message(user_id, result.context)
 
     keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton("Это не туда", callback_data=f"toggle_context:{note_id}")]]
     )
-    await update.message.reply_text(f"Записал как «{label}».", reply_markup=keyboard)
+    await update.message.reply_text(reply_text, reply_markup=keyboard)
 
 
 async def handle_context_correction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
