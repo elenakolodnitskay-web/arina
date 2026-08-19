@@ -9,6 +9,13 @@ from telegram.ext import (
     filters,
 )
 
+from bot.handlers.documents_flow import (
+    CONFIRM_CALLBACK,
+    REFORMULATE_CALLBACK,
+    create_document,
+    handle_confirm_document,
+    handle_reformulate_document,
+)
 from bot.handlers.free_chat import handle_context_correction, handle_message
 from bot.handlers.onboarding import cancel, delete_my_data, receive_profile, start
 from bot.handlers.tasks_flow import create_task, handle_cancel_task, list_tasks
@@ -47,6 +54,11 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("task", create_task))
     application.add_handler(CommandHandler("tasks", list_tasks))
     application.add_handler(CallbackQueryHandler(handle_cancel_task, pattern=r"^cancel_task:"))
+    application.add_handler(CommandHandler("document", create_document))
+    application.add_handler(CallbackQueryHandler(handle_confirm_document, pattern=rf"^{CONFIRM_CALLBACK}$"))
+    application.add_handler(
+        CallbackQueryHandler(handle_reformulate_document, pattern=rf"^{REFORMULATE_CALLBACK}$")
+    )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(handle_context_correction, pattern=r"^toggle_context:"))
     return application
