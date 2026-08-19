@@ -1,0 +1,9 @@
+python-telegram-bot>=20,<21
+openai
+SQLAlchemy>=2,<3
+alembic
+psycopg2-binary
+cryptography
+APScheduler
+pydantic-settings
+pytest
