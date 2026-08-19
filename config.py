@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str
     database_url: str
-    openrouter_base_url: str
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_api_key: str
     fernet_key: str
     allowed_user_ids: str = ""
