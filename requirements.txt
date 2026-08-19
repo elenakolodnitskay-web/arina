@@ -7,3 +7,4 @@ cryptography
 APScheduler
 pydantic-settings
 pytest
+pytest-asyncio
