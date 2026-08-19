@@ -19,5 +19,5 @@ def test_allowed_user_ids_list_parses_csv():
 
 
 def test_allowed_user_ids_list_empty_by_default():
-    settings = Settings()
+    settings = Settings(allowed_user_ids="")
     assert settings.allowed_user_ids_list == []
