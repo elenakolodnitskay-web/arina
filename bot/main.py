@@ -30,6 +30,9 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
+# openai SDK на DEBUG логирует тела запросов — а через них проходит текст сообщений
+# пользователя (промпты к LLM). Держим WARNING, чтобы это не могло утечь в лог.
+logging.getLogger("openai").setLevel(logging.WARNING)
 
 
 async def _on_startup(application: Application) -> None:
