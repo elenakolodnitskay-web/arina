@@ -1,9 +1,11 @@
 import logging
 
+from telegram import Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
+    ContextTypes,
     ConversationHandler,
     MessageHandler,
     filters,
@@ -34,9 +36,23 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 # пользователя (промпты к LLM). Держим WARNING, чтобы это не могло утечь в лог.
 logging.getLogger("openai").setLevel(logging.WARNING)
 
+logger = logging.getLogger(__name__)
+
 
 async def _on_startup(application: Application) -> None:
     get_scheduler().start()
+
+
+async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error("Unhandled exception while processing an update", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_chat is not None:
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Что-то пошло не так на нашей стороне. Попробуйте ещё раз чуть позже.",
+            )
+        except Exception:
+            logger.error("Failed to notify the user about the error")
 
 
 def build_application() -> Application:
@@ -64,6 +80,7 @@ def build_application() -> Application:
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(handle_context_correction, pattern=r"^toggle_context:"))
+    application.add_error_handler(_on_error)
     return application
 
 
