@@ -77,7 +77,8 @@ db/
 llm/
   client.py                    # клиент OpenRouter (напрямую) с retry-логикой
   classify.py                   # классификация сообщений: работа/личное
-  documents.py                   # генерация писем/документов по описанию
+  reply.py                       # содержательный разговорный ответ (Фаза 6.5)
+  documents.py                    # генерация писем/документов по описанию
 core/
   tasks.py                        # разбор естественного языка в задачу
   scheduler.py                     # APScheduler, доставка напоминаний
@@ -90,9 +91,15 @@ bot/
     free_chat.py                         # приём сообщений, классификация, коррекция
     tasks_flow.py                         # создание/просмотр задач, напоминания
     documents_flow.py                      # генерация документов + подтверждение
+scripts/
+  retention_report.py                       # отчёт по retention беты (Фаза 9)
 tests/
   test_*.py                                # юнит-тесты по модулям
   calibration/                              # калибровочный набор для классификации
+Dockerfile                                    # образ бота (Фаза 9)
+docker-compose.yml                             # Postgres для локальной разработки
+docker-compose.prod.yml                         # прод-стек (Postgres + bot) для Beget
+DEPLOY.md                                        # инструкция по деплою на Beget
 ```
 
 ## Общие правила разработки

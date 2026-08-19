@@ -2,7 +2,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore": в проде .env также содержит POSTGRES_PASSWORD — переменную
+    # для docker-compose (${POSTGRES_PASSWORD} в docker-compose.prod.yml), не поле
+    # приложения. Без extra="ignore" pydantic-settings падает на "лишнем" поле.
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     telegram_bot_token: str
     database_url: str
