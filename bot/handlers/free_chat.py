@@ -1,12 +1,14 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from bot.handlers.tasks_flow import create_task_from_text, describe_schedule
 from config import settings
 from core.dialog_summary import get_summary, record_message
 from db.models import Context, Note, User
 from db.session import SessionLocal
 from llm.classify import classify_message
 from llm.client import LLMUnavailableError
+from llm.intent import Intent, detect_intent
 from llm.reply import generate_reply
 
 CONTEXT_LABELS = {Context.work: "рабочее", Context.personal: "личное"}
@@ -23,20 +25,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if user is None or not user.onboarding_completed:
             await update.message.reply_text("Сначала пройдите короткий опрос — напишите /start.")
             return
+        user_id = user.id
 
-        try:
-            result = await classify_message(update.message.text)
-            summary = get_summary(user.id, result.context)
-            reply_text = await generate_reply(update.message.text, result.context, summary)
-        except LLMUnavailableError as exc:
-            await update.message.reply_text(str(exc))
-            return
+    text = update.message.text
 
-        note = Note(user_id=user.id, content=update.message.text, context=result.context)
+    try:
+        intent = await detect_intent(text)
+
+        if intent == Intent.task:
+            task = await create_task_from_text(user_id, text)
+            if task is not None:
+                await update.message.reply_text(f"Записал: «{task.title}» — {describe_schedule(task)}.")
+                return
+            # Модель решила, что это задача, но не смогла распознать срок/повтор —
+            # не показываем "не понял срок" на нейтральное сообщение, ведём как чат.
+
+        result = await classify_message(text)
+        summary = get_summary(user_id, result.context)
+        reply_text = await generate_reply(text, result.context, summary)
+    except LLMUnavailableError as exc:
+        await update.message.reply_text(str(exc))
+        return
+
+    with SessionLocal() as session:
+        note = Note(user_id=user_id, content=text, context=result.context)
         session.add(note)
         session.commit()
         note_id = note.id
-        user_id = user.id
 
     await record_message(user_id, result.context)
 

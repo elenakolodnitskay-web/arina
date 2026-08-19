@@ -5,9 +5,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from bot.handlers import free_chat
-from db.models import Base, Context, Note, User
+from core.tasks import ParsedTask
+from db.models import Base, Context, Note, Task, User
 from llm.classify import ClassificationResult
 from llm.client import LLMUnavailableError
+from llm.intent import Intent
 
 
 @pytest.fixture()
@@ -39,6 +41,15 @@ def no_real_dialog_summary(monkeypatch):
 def no_real_reply(monkeypatch):
     mock = AsyncMock(return_value="сгенерированный ответ")
     monkeypatch.setattr(free_chat, "generate_reply", mock)
+    return mock
+
+
+@pytest.fixture(autouse=True)
+def chat_intent_by_default(monkeypatch):
+    # По умолчанию сообщение не похоже на задачу — большинство тестов проверяют
+    # ветку обычного чата, не хотят каждый раз явно мокать detect_intent.
+    mock = AsyncMock(return_value=Intent.chat)
+    monkeypatch.setattr(free_chat, "detect_intent", mock)
     return mock
 
 
@@ -122,6 +133,59 @@ async def test_handle_message_passes_existing_summary_into_reply(
     await free_chat.handle_message(update, context=None)
 
     no_real_reply.assert_awaited_once_with("что там с поездкой", Context.personal, "ранее обсуждали поездку")
+
+
+@pytest.mark.asyncio
+async def test_handle_message_routes_task_intent_to_task_creation(
+    db_session_factory, allowed_user, chat_intent_by_default, no_real_reply, monkeypatch
+):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.commit()
+        user_id = user.id
+
+    chat_intent_by_default.return_value = Intent.task
+    fake_task = Task(id=1, user_id=user_id, title="позвонить маме", context=Context.personal)
+    monkeypatch.setattr(free_chat, "create_task_from_text", AsyncMock(return_value=fake_task))
+    monkeypatch.setattr(free_chat, "describe_schedule", MagicMock(return_value="напомню 20.08.2026 18:00 (UTC)"))
+    classify_mock = AsyncMock()
+    monkeypatch.setattr(free_chat, "classify_message", classify_mock)
+
+    update = make_message_update(telegram_id=111, text="напомни в 20:56 позвонить маме")
+    await free_chat.handle_message(update, context=None)
+
+    free_chat.create_task_from_text.assert_awaited_once_with(user_id, "напомни в 20:56 позвонить маме")
+    assert "позвонить маме" in update.message.reply_text.await_args.args[0]
+    assert "напомню 20.08.2026 18:00" in update.message.reply_text.await_args.args[0]
+    classify_mock.assert_not_called()
+    no_real_reply.assert_not_called()
+    with db_session_factory() as session:
+        assert session.query(Note).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_handle_message_falls_back_to_chat_when_task_has_no_schedule(
+    db_session_factory, allowed_user, chat_intent_by_default, no_real_reply, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    chat_intent_by_default.return_value = Intent.task
+    monkeypatch.setattr(free_chat, "create_task_from_text", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        free_chat,
+        "classify_message",
+        AsyncMock(return_value=ClassificationResult(context=Context.personal, confidence=0.6)),
+    )
+
+    update = make_message_update(telegram_id=111, text="надо бы созвониться с кем-то как-нибудь")
+    await free_chat.handle_message(update, context=None)
+
+    no_real_reply.assert_awaited_once()
+    with db_session_factory() as session:
+        assert session.query(Note).count() == 1
 
 
 @pytest.mark.asyncio

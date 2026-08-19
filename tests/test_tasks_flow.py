@@ -114,6 +114,54 @@ async def test_create_task_reports_llm_unavailable(db_session_factory, allowed_u
     update.message.reply_text.assert_awaited_once_with("сеть недоступна")
 
 
+def test_describe_schedule_one_off():
+    task = Task(due_at=datetime(2026, 8, 20, 15, 0, tzinfo=timezone.utc), recurrence_rule=None)
+    assert "20.08.2026 15:00" in tasks_flow.describe_schedule(task)
+
+
+def test_describe_schedule_recurring():
+    task = Task(due_at=None, recurrence_rule="0 9 * * 1")
+    assert "0 9 * * 1" in tasks_flow.describe_schedule(task)
+
+
+@pytest.mark.asyncio
+async def test_create_task_from_text_saves_and_schedules(db_session_factory, allowed_user, monkeypatch):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.commit()
+        user_id = user.id
+
+    parsed = ParsedTask(
+        title="позвонить маме", due_at=datetime(2026, 8, 20, 15, 0, tzinfo=timezone.utc), recurrence_rule=None
+    )
+    monkeypatch.setattr(tasks_flow, "parse_task", AsyncMock(return_value=parsed))
+    monkeypatch.setattr(
+        tasks_flow, "classify_message", AsyncMock(return_value=ClassificationResult(Context.personal, 0.8))
+    )
+
+    task = await tasks_flow.create_task_from_text(user_id, "напомни позвонить маме завтра в 18:00")
+
+    assert task is not None
+    assert task.title == "позвонить маме"
+    assert task.context == Context.personal
+    tasks_flow.schedule_task_reminder.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_task_from_text_returns_none_without_schedule(db_session_factory, allowed_user, monkeypatch):
+    parsed = ParsedTask(title="что-то", due_at=None, recurrence_rule=None)
+    monkeypatch.setattr(tasks_flow, "parse_task", AsyncMock(return_value=parsed))
+    monkeypatch.setattr(
+        tasks_flow, "classify_message", AsyncMock(return_value=ClassificationResult(Context.personal, 0.5))
+    )
+
+    task = await tasks_flow.create_task_from_text(1, "что-то неясное")
+
+    assert task is None
+    tasks_flow.schedule_task_reminder.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_handle_cancel_task_marks_cancelled(db_session_factory, allowed_user):
     with db_session_factory() as session:

@@ -3,17 +3,49 @@ from telegram.ext import ContextTypes
 
 from config import settings
 from core.scheduler import cancel_task_reminder, schedule_task_reminder
-from core.tasks import ParsedTask, parse_task
+from core.tasks import parse_task
 from db.models import Task, TaskStatus, User
 from db.session import SessionLocal
 from llm.classify import classify_message
 from llm.client import LLMUnavailableError
 
 
-def _describe_schedule(parsed: ParsedTask) -> str:
-    if parsed.recurrence_rule:
-        return f"повторяется по расписанию ({parsed.recurrence_rule})"
-    return f"напомню {parsed.due_at.strftime('%d.%m.%Y %H:%M')} (UTC)"
+def describe_schedule(task: Task) -> str:
+    if task.recurrence_rule:
+        return f"повторяется по расписанию ({task.recurrence_rule})"
+    return f"напомню {task.due_at.strftime('%d.%m.%Y %H:%M')} (UTC)"
+
+
+async def create_task_from_text(user_id: int, text: str) -> Task | None:
+    """Разбирает текст через LLM, сохраняет Task и ставит напоминание в планировщик.
+
+    Общая логика для команды /task и распознавания намерения в свободном чате
+    (bot/handlers/free_chat.py) — вынесена сюда, чтобы не дублировать разбор,
+    классификацию контекста и постановку в планировщик в двух местах.
+
+    Возвращает None, если модель не смогла распознать срок/повтор — ничего не
+    сохраняет в этом случае.
+    """
+    parsed = await parse_task(text)
+    classification = await classify_message(text)
+
+    if parsed.due_at is None and not parsed.recurrence_rule:
+        return None
+
+    with SessionLocal() as session:
+        task = Task(
+            user_id=user_id,
+            title=parsed.title,
+            context=classification.context,
+            due_at=parsed.due_at,
+            recurrence_rule=parsed.recurrence_rule,
+            status=TaskStatus.active,
+        )
+        session.add(task)
+        session.commit()
+        schedule_task_reminder(task)
+        session.refresh(task)
+        return task
 
 
 async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -34,32 +66,19 @@ async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if user is None or not user.onboarding_completed:
             await update.message.reply_text("Сначала пройдите короткий опрос — напишите /start.")
             return
+        user_id = user.id
 
-        try:
-            parsed = await parse_task(text)
-            classification = await classify_message(text)
-        except LLMUnavailableError as exc:
-            await update.message.reply_text(str(exc))
-            return
+    try:
+        task = await create_task_from_text(user_id, text)
+    except LLMUnavailableError as exc:
+        await update.message.reply_text(str(exc))
+        return
 
-        if parsed.due_at is None and not parsed.recurrence_rule:
-            await update.message.reply_text("Не понял срок — уточните, когда напомнить.")
-            return
+    if task is None:
+        await update.message.reply_text("Не понял срок — уточните, когда напомнить.")
+        return
 
-        task = Task(
-            user_id=user.id,
-            title=parsed.title,
-            context=classification.context,
-            due_at=parsed.due_at,
-            recurrence_rule=parsed.recurrence_rule,
-            status=TaskStatus.active,
-        )
-        session.add(task)
-        session.commit()
-        schedule_task_reminder(task)
-        title = task.title
-
-    await update.message.reply_text(f"Записал: «{title}» — {_describe_schedule(parsed)}.")
+    await update.message.reply_text(f"Записал: «{task.title}» — {describe_schedule(task)}.")
 
 
 async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
