@@ -12,10 +12,6 @@ from llm.reply import generate_reply
 CONTEXT_LABELS = {Context.work: "рабочее", Context.personal: "личное"}
 
 
-def _other_context(context: Context) -> Context:
-    return Context.personal if context == Context.work else Context.work
-
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_id = update.effective_user.id
 
@@ -45,7 +41,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await record_message(user_id, result.context)
 
     keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Это не туда", callback_data=f"toggle_context:{note_id}")]]
+        [
+            [
+                InlineKeyboardButton("Рабочее", callback_data=f"set_context:{note_id}:work"),
+                InlineKeyboardButton("Личное", callback_data=f"set_context:{note_id}:personal"),
+            ]
+        ]
     )
     await update.message.reply_text(reply_text, reply_markup=keyboard)
 
@@ -53,7 +54,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def handle_context_correction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     telegram_id = query.from_user.id
-    note_id = int(query.data.split(":", 1)[1])
+    _, note_id_str, new_context_value = query.data.split(":", 2)
+    note_id = int(note_id_str)
+    new_context = Context(new_context_value)
 
     with SessionLocal() as session:
         note = session.get(Note, note_id)
@@ -63,9 +66,8 @@ async def handle_context_correction(update: Update, context: ContextTypes.DEFAUL
             await query.answer("Не получилось найти запись.", show_alert=True)
             return
 
-        note.context = _other_context(note.context)
+        note.context = new_context
         session.commit()
-        label = CONTEXT_LABELS[note.context]
+        label = CONTEXT_LABELS[new_context]
 
-    await query.answer()
-    await query.edit_message_text(f"Исправил на «{label}».")
+    await query.answer(f"Отмечено как «{label}».")

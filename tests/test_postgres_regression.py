@@ -14,9 +14,11 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_telegram_id_beyond_int32_range_is_accepted():
-    # Реальный ID, который до фикса на BigInteger падал с
-    # psycopg2.errors.NumericValueOutOfRange (int4 ограничен ±2^31-1 ≈ 2.147 млрд).
-    large_telegram_id = 8866671232
+    # Синтетический ID за пределами int4 (±2^31-1 ≈ 2.147 млрд), который до фикса на
+    # BigInteger падал с psycopg2.errors.NumericValueOutOfRange. Не переиспользовать
+    # реальный ID из ALLOWED_USER_IDS — иначе тест конфликтует с настоящей строкой
+    # пользователя в общей dev-базе (Key already exists).
+    large_telegram_id = 9_999_999_999
 
     with SessionLocal() as session:
         user = User(telegram_id=large_telegram_id)

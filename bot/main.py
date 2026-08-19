@@ -79,7 +79,7 @@ def build_application() -> Application:
         CallbackQueryHandler(handle_reformulate_document, pattern=rf"^{REFORMULATE_CALLBACK}$")
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(CallbackQueryHandler(handle_context_correction, pattern=r"^toggle_context:"))
+    application.add_handler(CallbackQueryHandler(handle_context_correction, pattern=r"^set_context:"))
     application.add_error_handler(_on_error)
     return application
 

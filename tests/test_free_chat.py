@@ -143,7 +143,7 @@ async def test_handle_message_reports_llm_unavailable_error(db_session_factory, 
 
 
 @pytest.mark.asyncio
-async def test_context_correction_toggles_and_confirms(db_session_factory, allowed_user):
+async def test_context_correction_sets_chosen_context_and_confirms(db_session_factory, allowed_user):
     with db_session_factory() as session:
         user = User(telegram_id=111, onboarding_completed=True)
         session.add(user)
@@ -155,7 +155,7 @@ async def test_context_correction_toggles_and_confirms(db_session_factory, allow
 
     update = MagicMock()
     update.callback_query.from_user.id = 111
-    update.callback_query.data = f"toggle_context:{note_id}"
+    update.callback_query.data = f"set_context:{note_id}:personal"
     update.callback_query.answer = AsyncMock()
     update.callback_query.edit_message_text = AsyncMock()
 
@@ -165,8 +165,9 @@ async def test_context_correction_toggles_and_confirms(db_session_factory, allow
         note = session.get(Note, note_id)
         assert note.context == Context.personal
 
-    update.callback_query.edit_message_text.assert_awaited_once()
-    assert "личное" in update.callback_query.edit_message_text.await_args.args[0]
+    update.callback_query.answer.assert_awaited_once()
+    assert "личное" in update.callback_query.answer.await_args.args[0]
+    update.callback_query.edit_message_text.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -182,7 +183,7 @@ async def test_context_correction_rejects_foreign_note(db_session_factory, allow
 
     update = MagicMock()
     update.callback_query.from_user.id = 222
-    update.callback_query.data = f"toggle_context:{note_id}"
+    update.callback_query.data = f"set_context:{note_id}:work"
     update.callback_query.answer = AsyncMock()
     update.callback_query.edit_message_text = AsyncMock()
 
