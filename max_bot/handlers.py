@@ -1,3 +1,5 @@
+import asyncio
+
 from bot.handlers.onboarding import HELP_TEXT
 from bot.handlers.tasks_flow import create_task_from_text, describe_schedule
 from config import settings
@@ -73,17 +75,19 @@ async def handle_text_message(external_user_id: int, text: str) -> None:
         return
 
     try:
-        intent = await detect_intent(text)
+        # detect_intent и classify_message независимы друг от друга — запускаем
+        # параллельно вместо последовательных обращений к модели (тот же приём,
+        # что в bot/handlers/free_chat.py).
+        intent, result = await asyncio.gather(detect_intent(text), classify_message(text))
 
         if intent == Intent.task:
-            task = await create_task_from_text(user_id, text)
+            task = await create_task_from_text(user_id, text, result)
             if task is not None:
                 await send_message(
                     external_user_id, f"Записала: «{task.title}» — {describe_schedule(task)}."
                 )
                 return
 
-        result = await classify_message(text)
         recent_context = get_recent_context(user_id, result.context)
         reply_text = await generate_reply(text, result.context, recent_context, profile_summary)
     except LLMUnavailableError as exc:

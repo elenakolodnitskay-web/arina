@@ -1,3 +1,4 @@
+import asyncio
 from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -8,7 +9,7 @@ from core.scheduler import cancel_task_reminder, schedule_task_reminder
 from core.tasks import parse_task
 from db.models import Task, TaskStatus, User
 from db.session import SessionLocal
-from llm.classify import classify_message
+from llm.classify import ClassificationResult, classify_message
 from llm.client import LLMUnavailableError
 
 EDIT_PENDING_KEY = "pending_edit_task_id"
@@ -24,18 +25,27 @@ def describe_schedule(task: Task) -> str:
     return f"напомню {_format_local(task.due_at)}"
 
 
-async def create_task_from_text(user_id: int, text: str) -> Task | None:
+async def create_task_from_text(
+    user_id: int, text: str, classification: ClassificationResult | None = None
+) -> Task | None:
     """Разбирает текст через LLM, сохраняет Task и ставит напоминание в планировщик.
 
     Общая логика для команды /task и распознавания намерения в свободном чате
     (bot/handlers/free_chat.py) — вынесена сюда, чтобы не дублировать разбор,
     классификацию контекста и постановку в планировщик в двух местах.
 
+    `classification`, если уже известна вызывающей стороне (free_chat.py уже
+    запускает classify_message параллельно с detect_intent) — передаётся готовой,
+    чтобы не делать тот же запрос к модели повторно. Если не передана — разбор
+    задачи и классификация запускаются параллельно (они независимы друг от друга).
+
     Возвращает None, если модель не смогла распознать срок/повтор — ничего не
     сохраняет в этом случае.
     """
-    parsed = await parse_task(text)
-    classification = await classify_message(text)
+    if classification is None:
+        parsed, classification = await asyncio.gather(parse_task(text), classify_message(text))
+    else:
+        parsed = await parse_task(text)
 
     if parsed.due_at is None and not parsed.recurrence_rule:
         return None
@@ -60,12 +70,14 @@ async def apply_task_edit(user_id: int, task_id: int, text: str) -> Task | None:
     """Переразбирает текст через LLM и обновляет существующую задачу на месте —
     время/текст/контекст, включая перепостановку в планировщик.
 
+    Разбор задачи и классификация контекста независимы друг от друга — запускаются
+    параллельно, а не по очереди.
+
     Возвращает None, если модель не смогла распознать срок/повтор, или если
     задача не найдена/не принадлежит пользователю — в обоих случаях задача не
     меняется.
     """
-    parsed = await parse_task(text)
-    classification = await classify_message(text)
+    parsed, classification = await asyncio.gather(parse_task(text), classify_message(text))
 
     if parsed.due_at is None and not parsed.recurrence_rule:
         return None

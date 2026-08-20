@@ -52,6 +52,16 @@ def chat_intent_by_default(monkeypatch):
     return mock
 
 
+@pytest.fixture(autouse=True)
+def default_classification(monkeypatch):
+    # detect_intent и classify_message теперь всегда запускаются параллельно
+    # (asyncio.gather) — без дефолтного мока тесты, которым результат
+    # классификации не важен, делали бы настоящий сетевой запрос.
+    mock = AsyncMock(return_value=ClassificationResult(context=Context.personal, confidence=0.9))
+    monkeypatch.setattr(free_chat, "classify_message", mock)
+    return mock
+
+
 def make_message_update(telegram_id: int, text: str):
     update = MagicMock()
     update.effective_user.id = telegram_id
@@ -184,16 +194,22 @@ async def test_handle_message_routes_task_intent_to_task_creation(
     fake_task = Task(id=1, user_id=user_id, title="позвонить маме", context=Context.personal)
     monkeypatch.setattr(free_chat, "create_task_from_text", AsyncMock(return_value=fake_task))
     monkeypatch.setattr(free_chat, "describe_schedule", MagicMock(return_value="напомню 20.08.2026 18:00 (UTC)"))
-    classify_mock = AsyncMock()
+    classification = ClassificationResult(context=Context.personal, confidence=0.9)
+    classify_mock = AsyncMock(return_value=classification)
     monkeypatch.setattr(free_chat, "classify_message", classify_mock)
 
     update = make_message_update(telegram_id=111, text="напомни в 20:56 позвонить маме")
     await free_chat.handle_message(update, make_context())
 
-    free_chat.create_task_from_text.assert_awaited_once_with(user_id, "напомни в 20:56 позвонить маме")
+    # classify_message теперь запускается параллельно с detect_intent (не
+    # последовательно) — её результат передаётся в create_task_from_text, чтобы
+    # не запрашивать классификацию у модели ещё раз внутри неё.
+    free_chat.create_task_from_text.assert_awaited_once_with(
+        user_id, "напомни в 20:56 позвонить маме", classification
+    )
     assert "позвонить маме" in update.message.reply_text.await_args.args[0]
     assert "напомню 20.08.2026 18:00" in update.message.reply_text.await_args.args[0]
-    classify_mock.assert_not_called()
+    classify_mock.assert_awaited_once_with("напомни в 20:56 позвонить маме")
     no_real_reply.assert_not_called()
     with db_session_factory() as session:
         assert session.query(Note).count() == 0
@@ -218,7 +234,7 @@ async def test_handle_message_routes_finance_intent_to_finance_flow(
 
     finance_mock.assert_awaited_once()
     assert "500" in update.message.reply_text.await_args.args[0]
-    classify_mock.assert_not_called()
+    classify_mock.assert_awaited_once()  # теперь идёт параллельно с detect_intent
     no_real_reply.assert_not_called()
     with db_session_factory() as session:
         assert session.query(Note).count() == 0
@@ -243,7 +259,7 @@ async def test_handle_message_routes_document_intent_to_document_draft(
     await free_chat.handle_message(update, context)
 
     draft_mock.assert_awaited_once_with(update, context, "напиши письмо клиенту про перенос встречи")
-    classify_mock.assert_not_called()
+    classify_mock.assert_awaited_once()  # теперь идёт параллельно с detect_intent
     no_real_reply.assert_not_called()
     with db_session_factory() as session:
         assert session.query(Note).count() == 0
@@ -268,7 +284,7 @@ async def test_handle_message_routes_relay_intent_to_relay_draft(
     await free_chat.handle_message(update, context)
 
     relay_mock.assert_awaited_once_with(update, context, "передай @ivan_petrov, что встреча переносится")
-    classify_mock.assert_not_called()
+    classify_mock.assert_awaited_once()  # теперь идёт параллельно с detect_intent
     no_real_reply.assert_not_called()
     with db_session_factory() as session:
         assert session.query(Note).count() == 0
@@ -293,7 +309,7 @@ async def test_handle_message_routes_email_intent_to_email_draft(
     await free_chat.handle_message(update, context)
 
     email_mock.assert_awaited_once_with(update, context, "напиши на ivan@example.com про оплату")
-    classify_mock.assert_not_called()
+    classify_mock.assert_awaited_once()  # теперь идёт параллельно с detect_intent
     no_real_reply.assert_not_called()
     with db_session_factory() as session:
         assert session.query(Note).count() == 0

@@ -1,3 +1,5 @@
+import asyncio
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
@@ -103,10 +105,17 @@ async def _process_text(
         return
 
     try:
-        intent = await detect_intent(text)
+        # detect_intent и classify_message не зависят друг от друга (оба берут на
+        # вход только text) — запускаем параллельно вместо последовательных
+        # обращений к модели, это и есть основная задержка ответа. Классификация
+        # пригодится либо для постановки задачи (не придётся вызывать её ещё раз
+        # внутри create_task_from_text), либо для обычного чата ниже — она нужна
+        # почти всегда, кроме finance/document/relay/email, где расчёт впустую
+        # компенсируется тем, что шёл параллельно, не добавляя задержки.
+        intent, classification = await asyncio.gather(detect_intent(text), classify_message(text))
 
         if intent == Intent.task:
-            task = await create_task_from_text(user_id, text)
+            task = await create_task_from_text(user_id, text, classification)
             if task is not None:
                 await update.message.reply_text(f"Записала: «{task.title}» — {describe_schedule(task)}.")
                 return
@@ -139,7 +148,7 @@ async def _process_text(
             await start_email_draft(update, context, text)
             return
 
-        result = await classify_message(text)
+        result = classification
         recent_context = get_recent_context(user_id, result.context)
         reply_text = await generate_reply(text, result.context, recent_context, profile_summary)
     except LLMUnavailableError as exc:

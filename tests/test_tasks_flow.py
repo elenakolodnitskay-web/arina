@@ -182,6 +182,35 @@ async def test_create_task_from_text_returns_none_without_schedule(db_session_fa
 
 
 @pytest.mark.asyncio
+async def test_create_task_from_text_reuses_provided_classification(
+    db_session_factory, allowed_user, monkeypatch
+):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.commit()
+        user_id = user.id
+
+    parsed = ParsedTask(
+        title="позвонить маме", due_at=datetime(2026, 8, 20, 15, 0, tzinfo=timezone.utc), recurrence_rule=None
+    )
+    monkeypatch.setattr(tasks_flow, "parse_task", AsyncMock(return_value=parsed))
+    classify_mock = AsyncMock()
+    monkeypatch.setattr(tasks_flow, "classify_message", classify_mock)
+
+    given_classification = ClassificationResult(Context.work, 0.95)
+    task = await tasks_flow.create_task_from_text(
+        user_id, "напомни позвонить маме завтра в 18:00", given_classification
+    )
+
+    assert task.context == Context.work
+    # Классификация уже была передана вызывающей стороной (free_chat.py уже
+    # получила её параллельно с detect_intent) — повторного похода к модели
+    # быть не должно.
+    classify_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_apply_task_edit_updates_existing_task(db_session_factory, allowed_user, monkeypatch):
     with db_session_factory() as session:
         user = User(telegram_id=111, onboarding_completed=True)
