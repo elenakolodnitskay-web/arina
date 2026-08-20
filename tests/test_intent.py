@@ -24,6 +24,15 @@ async def test_detect_intent_chat(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_detect_intent_finance(monkeypatch):
+    monkeypatch.setattr(intent, "complete", AsyncMock(return_value='{"intent": "finance"}'))
+
+    result = await intent.detect_intent("потратила 500 в Пятёрочке")
+
+    assert result == intent.Intent.finance
+
+
+@pytest.mark.asyncio
 async def test_detect_intent_parses_markdown_wrapped_json(monkeypatch):
     raw = '```json\n{"intent": "task"}\n```'
     monkeypatch.setattr(intent, "complete", AsyncMock(return_value=raw))

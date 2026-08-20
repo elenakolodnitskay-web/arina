@@ -171,6 +171,55 @@ async def test_handle_message_routes_task_intent_to_task_creation(
 
 
 @pytest.mark.asyncio
+async def test_handle_message_routes_finance_intent_to_finance_flow(
+    db_session_factory, allowed_user, chat_intent_by_default, no_real_reply, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    chat_intent_by_default.return_value = Intent.finance
+    finance_mock = AsyncMock(return_value="Записал расход: 500 ₽ (Пятёрочка).")
+    monkeypatch.setattr(free_chat, "record_finance_message", finance_mock)
+    classify_mock = AsyncMock()
+    monkeypatch.setattr(free_chat, "classify_message", classify_mock)
+
+    update = make_message_update(telegram_id=111, text="потратила 500 в Пятёрочке")
+    await free_chat.handle_message(update, make_context())
+
+    finance_mock.assert_awaited_once()
+    assert "500" in update.message.reply_text.await_args.args[0]
+    classify_mock.assert_not_called()
+    no_real_reply.assert_not_called()
+    with db_session_factory() as session:
+        assert session.query(Note).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_handle_message_falls_back_to_chat_when_finance_unparseable(
+    db_session_factory, allowed_user, chat_intent_by_default, no_real_reply, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    chat_intent_by_default.return_value = Intent.finance
+    monkeypatch.setattr(free_chat, "record_finance_message", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        free_chat,
+        "classify_message",
+        AsyncMock(return_value=ClassificationResult(context=Context.personal, confidence=0.5)),
+    )
+
+    update = make_message_update(telegram_id=111, text="что-то невнятное про деньги")
+    await free_chat.handle_message(update, make_context())
+
+    no_real_reply.assert_awaited_once()
+    with db_session_factory() as session:
+        assert session.query(Note).count() == 1
+
+
+@pytest.mark.asyncio
 async def test_handle_message_falls_back_to_chat_when_task_has_no_schedule(
     db_session_factory, allowed_user, chat_intent_by_default, no_real_reply, monkeypatch
 ):

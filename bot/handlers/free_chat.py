@@ -1,6 +1,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from bot.handlers.finance_flow import record_finance_message
 from bot.handlers.tasks_flow import EDIT_PENDING_KEY, apply_task_edit, create_task_from_text, describe_schedule
 from config import settings
 from core.dialog_summary import get_summary, record_message
@@ -76,6 +77,14 @@ async def _process_text(
                 return
             # Модель решила, что это задача, но не смогла распознать срок/повтор —
             # не показываем "не понял срок" на нейтральное сообщение, ведём как чат.
+
+        elif intent == Intent.finance:
+            finance_reply = await record_finance_message(user_id, text)
+            if finance_reply is not None:
+                await update.message.reply_text(finance_reply)
+                return
+            # Модель решила, что это про деньги, но не смогла разобрать сумму/тип —
+            # так же, как с task, ведём как обычный чат вместо "не понял".
 
         result = await classify_message(text)
         summary = get_summary(user_id, result.context)
