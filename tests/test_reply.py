@@ -58,3 +58,13 @@ async def test_generate_reply_omits_profile_block_when_absent(monkeypatch):
 
     system_prompt = fake_complete.await_args.args[0][0]["content"]
     assert "О пользователе (из профиля)" not in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_generate_reply_enables_web_search(monkeypatch):
+    fake_complete = AsyncMock(return_value="В Симферополе сейчас +7.")
+    monkeypatch.setattr(reply, "complete", fake_complete)
+
+    await reply.generate_reply("какая погода в Симферополе", Context.personal, None)
+
+    assert fake_complete.await_args.kwargs["web_search"] is True

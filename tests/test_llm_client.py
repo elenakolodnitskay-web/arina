@@ -34,6 +34,28 @@ async def test_complete_returns_content_on_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_complete_without_web_search_omits_tools(monkeypatch):
+    create = AsyncMock(return_value=make_response("привет"))
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(client, "_client", lambda: fake_client)
+
+    await client.complete([{"role": "user", "content": "hi"}])
+
+    assert create.await_args.kwargs["extra_body"] is None
+
+
+@pytest.mark.asyncio
+async def test_complete_with_web_search_passes_openrouter_tool(monkeypatch):
+    create = AsyncMock(return_value=make_response("погода хорошая"))
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(client, "_client", lambda: fake_client)
+
+    await client.complete([{"role": "user", "content": "какая погода"}], web_search=True)
+
+    assert create.await_args.kwargs["extra_body"] == {"tools": [{"type": "openrouter:web_search"}]}
+
+
+@pytest.mark.asyncio
 async def test_complete_retries_then_succeeds(monkeypatch):
     create = AsyncMock(
         side_effect=[APIConnectionError(request=_FAKE_REQUEST), make_response("ok после ретрая")]
