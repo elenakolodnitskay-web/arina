@@ -56,6 +56,7 @@ async def handle_text_message(external_user_id: int, text: str) -> None:
             return
 
         user_id = user.id
+        profile_summary = user.profile_summary
 
     stripped = text.strip()
     if stripped == "/help":
@@ -78,7 +79,7 @@ async def handle_text_message(external_user_id: int, text: str) -> None:
 
         result = await classify_message(text)
         recent_context = get_recent_context(user_id, result.context)
-        reply_text = await generate_reply(text, result.context, recent_context)
+        reply_text = await generate_reply(text, result.context, recent_context, profile_summary)
     except LLMUnavailableError as exc:
         await send_message(external_user_id, str(exc))
         return

@@ -74,6 +74,7 @@ async def _process_text(
             await update.message.reply_text("Сначала пройдите короткий опрос — напишите /start.")
             return
         user_id = user.id
+        profile_summary = user.profile_summary
 
     pending_task_id = context.user_data.pop(EDIT_PENDING_KEY, None)
     if pending_task_id is not None:
@@ -128,7 +129,7 @@ async def _process_text(
 
         result = await classify_message(text)
         recent_context = get_recent_context(user_id, result.context)
-        reply_text = await generate_reply(text, result.context, recent_context)
+        reply_text = await generate_reply(text, result.context, recent_context, profile_summary)
     except LLMUnavailableError as exc:
         await update.message.reply_text(str(exc))
         return

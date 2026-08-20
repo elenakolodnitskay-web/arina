@@ -7,6 +7,7 @@ CONTEXT_LABELS = {Context.work: "рабочее", Context.personal: "лично�
 
 SYSTEM_PROMPT_TEMPLATE = """Ты — Арина, личный ИИ-ассистент пользователя в Telegram. \
 Помогаешь с рабочими и личными делами. Это сообщение отнесено к контексту: {context_label}.
+{profile_block}
 {recent_messages_block}
 Ты умеешь ставить задачи и напоминания (разовые и повторяющиеся) по свободной \
 формулировке — пользователю не нужна отдельная команда, достаточно попросить \
@@ -14,19 +15,30 @@ SYSTEM_PROMPT_TEMPLATE = """Ты — Арина, личный ИИ-ассист�
 нужное время через Telegram. Если пользователь спрашивает, умеешь ли ты напоминать \
 или как это работает — отвечай, что да, умеешь, именно так и присылаешь напоминания.
 
-Отвечай по-русски, коротко и по-человечески — как ассистент, который держит в уме \
-контекст разговора, а не заполняет анкету. Не выдумывай факты, которых не было."""
+Подстраивайся под то, как пишет именно этот пользователь — судя по его текущему \
+сообщению и истории выше: формально или неформально, короткими фразами или \
+развёрнуто, с эмодзи или без. У разных людей должен получаться разный по звучанию \
+ответ, а не один и тот же стиль для всех. Не копируй фразы дословно — ориентируйся \
+на тон, длину и манеру, а не на конкретные слова.
+
+Отвечай по-русски и по-человечески — как ассистент, который держит в уме контекст \
+разговора, а не заполняет анкету. Не выдумывай факты, которых не было."""
 
 
-async def generate_reply(text: str, context: Context, recent_messages: str | None) -> str:
+async def generate_reply(
+    text: str, context: Context, recent_messages: str | None, profile_summary: str | None = None
+) -> str:
+    profile_block = f"\nО пользователе (из профиля): {profile_summary}" if profile_summary else ""
     recent_messages_block = (
         f"\nПоследние сообщения пользователя в этом контексте (для памяти о "
-        f"разговоре, не для копирования стиля дословно):\n{recent_messages}"
+        f"разговоре и для ориентира по манере письма):\n{recent_messages}"
         if recent_messages
         else ""
     )
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-        context_label=CONTEXT_LABELS[context], recent_messages_block=recent_messages_block
+        context_label=CONTEXT_LABELS[context],
+        profile_block=profile_block,
+        recent_messages_block=recent_messages_block,
     )
     messages = [
         {"role": "system", "content": system_prompt},

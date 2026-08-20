@@ -112,7 +112,7 @@ async def test_handle_message_saves_classified_note(
         assert note.context == Context.work
 
     no_real_recent_context.assert_called_once_with(user_id, Context.work)
-    no_real_reply.assert_awaited_once_with("отправить отчёт клиенту", Context.work, None)
+    no_real_reply.assert_awaited_once_with("отправить отчёт клиенту", Context.work, None, None)
 
     update.message.reply_text.assert_awaited_once()
     assert update.message.reply_text.await_args.args[0] == "сгенерированный ответ"
@@ -138,7 +138,35 @@ async def test_handle_message_passes_recent_context_into_reply(
     await free_chat.handle_message(update, make_context())
 
     no_real_reply.assert_awaited_once_with(
-        "что там с поездкой", Context.personal, "вчера обсуждали поездку в отпуск"
+        "что там с поездкой", Context.personal, "вчера обсуждали поездку в отпуск", None
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_message_passes_profile_summary_into_reply(
+    db_session_factory, allowed_user, no_real_reply, no_real_recent_context, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(
+            User(
+                telegram_id=111,
+                onboarding_completed=True,
+                profile_summary="фрилансер, дизайн и seo-проекты",
+            )
+        )
+        session.commit()
+
+    monkeypatch.setattr(
+        free_chat,
+        "classify_message",
+        AsyncMock(return_value=ClassificationResult(context=Context.work, confidence=0.8)),
+    )
+
+    update = make_message_update(telegram_id=111, text="что по проектам")
+    await free_chat.handle_message(update, make_context())
+
+    no_real_reply.assert_awaited_once_with(
+        "что по проектам", Context.work, None, "фрилансер, дизайн и seo-проекты"
     )
 
 
