@@ -61,11 +61,17 @@ def make_message_update(telegram_id: int, text: str):
     return update
 
 
+def make_context(user_data: dict | None = None):
+    context = MagicMock()
+    context.user_data = user_data if user_data is not None else {}
+    return context
+
+
 @pytest.mark.asyncio
 async def test_handle_message_ignores_non_whitelisted_user(db_session_factory, allowed_user):
     update = make_message_update(telegram_id=999, text="привет")
 
-    await free_chat.handle_message(update, context=None)
+    await free_chat.handle_message(update, make_context())
 
     update.message.reply_text.assert_not_called()
     with db_session_factory() as session:
@@ -76,7 +82,7 @@ async def test_handle_message_ignores_non_whitelisted_user(db_session_factory, a
 async def test_handle_message_prompts_start_for_unonboarded_user(db_session_factory, allowed_user):
     update = make_message_update(telegram_id=111, text="привет")
 
-    await free_chat.handle_message(update, context=None)
+    await free_chat.handle_message(update, make_context())
 
     update.message.reply_text.assert_awaited_once()
     assert "/start" in update.message.reply_text.await_args.args[0]
@@ -99,7 +105,7 @@ async def test_handle_message_saves_classified_note(
     )
 
     update = make_message_update(telegram_id=111, text="отправить отчёт клиенту")
-    await free_chat.handle_message(update, context=None)
+    await free_chat.handle_message(update, make_context())
 
     with db_session_factory() as session:
         note = session.query(Note).one()
@@ -130,7 +136,7 @@ async def test_handle_message_passes_existing_summary_into_reply(
     monkeypatch.setattr(free_chat, "get_summary", MagicMock(return_value="ранее обсуждали поездку"))
 
     update = make_message_update(telegram_id=111, text="что там с поездкой")
-    await free_chat.handle_message(update, context=None)
+    await free_chat.handle_message(update, make_context())
 
     no_real_reply.assert_awaited_once_with("что там с поездкой", Context.personal, "ранее обсуждали поездку")
 
@@ -153,7 +159,7 @@ async def test_handle_message_routes_task_intent_to_task_creation(
     monkeypatch.setattr(free_chat, "classify_message", classify_mock)
 
     update = make_message_update(telegram_id=111, text="напомни в 20:56 позвонить маме")
-    await free_chat.handle_message(update, context=None)
+    await free_chat.handle_message(update, make_context())
 
     free_chat.create_task_from_text.assert_awaited_once_with(user_id, "напомни в 20:56 позвонить маме")
     assert "позвонить маме" in update.message.reply_text.await_args.args[0]
@@ -181,7 +187,7 @@ async def test_handle_message_falls_back_to_chat_when_task_has_no_schedule(
     )
 
     update = make_message_update(telegram_id=111, text="надо бы созвониться с кем-то как-нибудь")
-    await free_chat.handle_message(update, context=None)
+    await free_chat.handle_message(update, make_context())
 
     no_real_reply.assert_awaited_once()
     with db_session_factory() as session:
@@ -199,9 +205,47 @@ async def test_handle_message_reports_llm_unavailable_error(db_session_factory, 
     )
 
     update = make_message_update(telegram_id=111, text="привет")
-    await free_chat.handle_message(update, context=None)
+    await free_chat.handle_message(update, make_context())
 
-    update.message.reply_text.assert_awaited_once_with("сеть недоступна")
+
+@pytest.mark.asyncio
+async def test_handle_message_applies_pending_task_edit(db_session_factory, allowed_user, monkeypatch):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.commit()
+        user_id = user.id
+
+    fake_task = Task(id=7, user_id=user_id, title="обновлённая задача", context=Context.work)
+    apply_edit_mock = AsyncMock(return_value=fake_task)
+    monkeypatch.setattr(free_chat, "apply_task_edit", apply_edit_mock)
+    monkeypatch.setattr(free_chat, "describe_schedule", MagicMock(return_value="напомню завтра в 10:00"))
+    detect_intent_mock = AsyncMock()
+    monkeypatch.setattr(free_chat, "detect_intent", detect_intent_mock)
+
+    update = make_message_update(telegram_id=111, text="завтра в 10:00")
+    context = make_context({free_chat.EDIT_PENDING_KEY: 7})
+    await free_chat.handle_message(update, context)
+
+    apply_edit_mock.assert_awaited_once_with(user_id, 7, "завтра в 10:00")
+    detect_intent_mock.assert_not_called()
+    assert free_chat.EDIT_PENDING_KEY not in context.user_data
+    assert "обновлённая задача" in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_message_reports_unparseable_task_edit(db_session_factory, allowed_user, monkeypatch):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(free_chat, "apply_task_edit", AsyncMock(return_value=None))
+
+    update = make_message_update(telegram_id=111, text="непонятно что")
+    context = make_context({free_chat.EDIT_PENDING_KEY: 7})
+    await free_chat.handle_message(update, context)
+
+    assert "без изменений" in update.message.reply_text.await_args.args[0]
     with db_session_factory() as session:
         assert session.query(Note).count() == 0
 

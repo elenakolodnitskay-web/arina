@@ -20,7 +20,7 @@ from bot.handlers.documents_flow import (
 )
 from bot.handlers.free_chat import handle_context_correction, handle_message
 from bot.handlers.onboarding import cancel, delete_my_data, help_command, receive_profile, start
-from bot.handlers.tasks_flow import create_task, handle_cancel_task, list_tasks
+from bot.handlers.tasks_flow import create_task, handle_cancel_task, handle_edit_task_button, list_tasks
 from bot.states import OnboardingState
 from config import settings
 from core.scheduler import get_scheduler
@@ -77,6 +77,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("task", create_task))
     application.add_handler(CommandHandler("tasks", list_tasks))
     application.add_handler(CallbackQueryHandler(handle_cancel_task, pattern=r"^cancel_task:"))
+    application.add_handler(CallbackQueryHandler(handle_edit_task_button, pattern=r"^edit_task:"))
     application.add_handler(CommandHandler("document", create_document))
     application.add_handler(CallbackQueryHandler(handle_confirm_document, pattern=rf"^{CONFIRM_CALLBACK}$"))
     application.add_handler(

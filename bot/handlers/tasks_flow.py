@@ -11,6 +11,8 @@ from db.session import SessionLocal
 from llm.classify import classify_message
 from llm.client import LLMUnavailableError
 
+EDIT_PENDING_KEY = "pending_edit_task_id"
+
 
 def _format_local(due_at) -> str:
     return due_at.astimezone(ZoneInfo(settings.timezone)).strftime("%d.%m.%Y %H:%M")
@@ -50,6 +52,35 @@ async def create_task_from_text(user_id: int, text: str) -> Task | None:
         session.add(task)
         session.commit()
         schedule_task_reminder(task)
+        session.refresh(task)
+        return task
+
+
+async def apply_task_edit(user_id: int, task_id: int, text: str) -> Task | None:
+    """Переразбирает текст через LLM и обновляет существующую задачу на месте —
+    время/текст/контекст, включая перепостановку в планировщик.
+
+    Возвращает None, если модель не смогла распознать срок/повтор, или если
+    задача не найдена/не принадлежит пользователю — в обоих случаях задача не
+    меняется.
+    """
+    parsed = await parse_task(text)
+    classification = await classify_message(text)
+
+    if parsed.due_at is None and not parsed.recurrence_rule:
+        return None
+
+    with SessionLocal() as session:
+        task = session.get(Task, task_id)
+        if task is None or task.user_id != user_id:
+            return None
+
+        task.title = parsed.title
+        task.context = classification.context
+        task.due_at = parsed.due_at
+        task.recurrence_rule = parsed.recurrence_rule
+        session.commit()
+        schedule_task_reminder(task)  # replace_existing=True переставит триггер
         session.refresh(task)
         return task
 
@@ -110,9 +141,36 @@ async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         for task in tasks:
             when = _format_local(task.due_at) if task.due_at else task.recurrence_rule
             keyboard = InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Отменить", callback_data=f"cancel_task:{task.id}")]]
+                [
+                    [
+                        InlineKeyboardButton("Изменить", callback_data=f"edit_task:{task.id}"),
+                        InlineKeyboardButton("Отменить", callback_data=f"cancel_task:{task.id}"),
+                    ]
+                ]
             )
             await update.message.reply_text(f"{task.title} — {when}", reply_markup=keyboard)
+
+
+async def handle_edit_task_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    telegram_id = query.from_user.id
+    task_id = int(query.data.split(":", 1)[1])
+
+    with SessionLocal() as session:
+        task = session.get(Task, task_id)
+        owner = session.get(User, task.user_id) if task is not None else None
+
+        if task is None or owner is None or owner.telegram_id != telegram_id:
+            await query.answer("Не получилось найти задачу.", show_alert=True)
+            return
+        title = task.title
+
+    context.user_data[EDIT_PENDING_KEY] = task_id
+    await query.answer()
+    await query.message.reply_text(
+        f"Опишите новое время или текст для «{title}» — например: «завтра в 15:00» "
+        "или сформулируйте задачу заново целиком."
+    )
 
 
 async def handle_cancel_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

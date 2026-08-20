@@ -1,7 +1,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from bot.handlers.tasks_flow import create_task_from_text, describe_schedule
+from bot.handlers.tasks_flow import EDIT_PENDING_KEY, apply_task_edit, create_task_from_text, describe_schedule
 from config import settings
 from core.dialog_summary import get_summary, record_message
 from db.models import Context, Note, User
@@ -28,6 +28,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         user_id = user.id
 
     text = update.message.text
+
+    pending_task_id = context.user_data.pop(EDIT_PENDING_KEY, None)
+    if pending_task_id is not None:
+        try:
+            task = await apply_task_edit(user_id, pending_task_id, text)
+        except LLMUnavailableError as exc:
+            await update.message.reply_text(str(exc))
+            return
+
+        if task is None:
+            await update.message.reply_text("Не понял новое время — задача осталась без изменений.")
+        else:
+            await update.message.reply_text(f"Обновил: «{task.title}» — {describe_schedule(task)}.")
+        return
 
     try:
         intent = await detect_intent(text)

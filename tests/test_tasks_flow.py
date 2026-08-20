@@ -165,6 +165,142 @@ async def test_create_task_from_text_returns_none_without_schedule(db_session_fa
 
 
 @pytest.mark.asyncio
+async def test_apply_task_edit_updates_existing_task(db_session_factory, allowed_user, monkeypatch):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        task = Task(
+            user_id=user.id,
+            title="старое название",
+            context=Context.work,
+            due_at=datetime(2026, 8, 20, 10, 0, tzinfo=timezone.utc),
+        )
+        session.add(task)
+        session.commit()
+        user_id = user.id
+        task_id = task.id
+
+    parsed = ParsedTask(
+        title="новое название", due_at=datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc), recurrence_rule=None
+    )
+    monkeypatch.setattr(tasks_flow, "parse_task", AsyncMock(return_value=parsed))
+    monkeypatch.setattr(
+        tasks_flow, "classify_message", AsyncMock(return_value=ClassificationResult(Context.personal, 0.9))
+    )
+
+    updated = await tasks_flow.apply_task_edit(user_id, task_id, "завтра в 15:00 новое название")
+
+    assert updated is not None
+    assert updated.title == "новое название"
+    assert updated.context == Context.personal
+    with db_session_factory() as session:
+        task = session.get(Task, task_id)
+        assert task.title == "новое название"
+    tasks_flow.schedule_task_reminder.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_apply_task_edit_returns_none_without_schedule(db_session_factory, allowed_user, monkeypatch):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        task = Task(user_id=user.id, title="задача", context=Context.work)
+        session.add(task)
+        session.commit()
+        user_id = user.id
+        task_id = task.id
+
+    parsed = ParsedTask(title="что-то", due_at=None, recurrence_rule=None)
+    monkeypatch.setattr(tasks_flow, "parse_task", AsyncMock(return_value=parsed))
+    monkeypatch.setattr(
+        tasks_flow, "classify_message", AsyncMock(return_value=ClassificationResult(Context.work, 0.5))
+    )
+
+    updated = await tasks_flow.apply_task_edit(user_id, task_id, "непонятно что")
+
+    assert updated is None
+    with db_session_factory() as session:
+        task = session.get(Task, task_id)
+        assert task.title == "задача"  # не изменилась
+    tasks_flow.schedule_task_reminder.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_apply_task_edit_rejects_foreign_task(db_session_factory, allowed_user, monkeypatch):
+    with db_session_factory() as session:
+        owner = User(telegram_id=111, onboarding_completed=True)
+        session.add(owner)
+        session.flush()
+        task = Task(user_id=owner.id, title="чужая задача", context=Context.work)
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    parsed = ParsedTask(title="взлом", due_at=datetime(2026, 8, 21, tzinfo=timezone.utc), recurrence_rule=None)
+    monkeypatch.setattr(tasks_flow, "parse_task", AsyncMock(return_value=parsed))
+    monkeypatch.setattr(
+        tasks_flow, "classify_message", AsyncMock(return_value=ClassificationResult(Context.work, 0.5))
+    )
+
+    updated = await tasks_flow.apply_task_edit(999, task_id, "что угодно")
+
+    assert updated is None
+    tasks_flow.schedule_task_reminder.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_edit_task_button_prompts_for_new_details(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        task = Task(user_id=user.id, title="старая задача", context=Context.work)
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    update = MagicMock()
+    update.callback_query.from_user.id = 111
+    update.callback_query.data = f"edit_task:{task_id}"
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.message.reply_text = AsyncMock()
+    context = MagicMock()
+    context.user_data = {}
+
+    await tasks_flow.handle_edit_task_button(update, context)
+
+    assert context.user_data[tasks_flow.EDIT_PENDING_KEY] == task_id
+    assert "старая задача" in update.callback_query.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_edit_task_button_rejects_foreign_task(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        owner = User(telegram_id=111, onboarding_completed=True)
+        session.add(owner)
+        session.flush()
+        task = Task(user_id=owner.id, title="чужая", context=Context.work)
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    update = MagicMock()
+    update.callback_query.from_user.id = 222
+    update.callback_query.data = f"edit_task:{task_id}"
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.message.reply_text = AsyncMock()
+    context = MagicMock()
+    context.user_data = {}
+
+    await tasks_flow.handle_edit_task_button(update, context)
+
+    assert tasks_flow.EDIT_PENDING_KEY not in context.user_data
+    update.callback_query.message.reply_text.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_handle_cancel_task_marks_cancelled(db_session_factory, allowed_user):
     with db_session_factory() as session:
         user = User(telegram_id=111, onboarding_completed=True)
