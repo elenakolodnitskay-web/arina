@@ -7,7 +7,7 @@ from openai import APIConnectionError
 
 from llm import transcribe
 
-_FAKE_REQUEST = httpx.Request("POST", "https://api.openai.com/v1/audio/transcriptions")
+_FAKE_REQUEST = httpx.Request("POST", "https://openrouter.ai/api/v1/audio/transcriptions")
 
 
 def make_response(text: str) -> SimpleNamespace:

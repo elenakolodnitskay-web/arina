@@ -23,12 +23,6 @@ class Settings(BaseSettings):
     max_bot_token: str = ""
     max_webhook_secret: str = ""
     max_webhook_port: int = 8091
-    # Распознавание голосовых сообщений (Whisper) — отдельный ключ и base_url, у
-    # OpenRouter нет STT. По той же причине, что и OPENROUTER_BASE_URL, может
-    # понадобиться указывать сюда адрес релея вместо api.openai.com напрямую, если
-    # OpenAI тоже блокирует IP Beget.
-    openai_base_url: str = "https://api.openai.com/v1"
-    openai_api_key: str = ""
 
     @property
     def allowed_user_ids_list(self) -> list[int]:
