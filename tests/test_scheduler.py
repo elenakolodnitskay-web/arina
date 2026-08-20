@@ -48,6 +48,15 @@ def test_schedule_task_reminder_uses_cron_trigger_for_recurring(fake_scheduler):
     kwargs = fake_scheduler.add_job.call_args.kwargs
     assert isinstance(kwargs["trigger"], CronTrigger)
     assert kwargs["id"] == "task-2"
+    assert str(kwargs["trigger"].timezone) == "Europe/Moscow"
+
+
+def test_get_scheduler_uses_configured_timezone(monkeypatch):
+    monkeypatch.setattr(scheduler, "_scheduler", None)
+
+    sched = scheduler.get_scheduler()
+
+    assert str(sched.timezone) == "Europe/Moscow"
 
 
 def test_cancel_task_reminder_removes_job(fake_scheduler):

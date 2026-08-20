@@ -115,8 +115,10 @@ async def test_create_task_reports_llm_unavailable(db_session_factory, allowed_u
 
 
 def test_describe_schedule_one_off():
+    # 15:00 UTC -> 18:00 по Москве (UTC+3, без перевода часов) — describe_schedule
+    # показывает пользователю местное время, не сырое UTC из БД.
     task = Task(due_at=datetime(2026, 8, 20, 15, 0, tzinfo=timezone.utc), recurrence_rule=None)
-    assert "20.08.2026 15:00" in tasks_flow.describe_schedule(task)
+    assert "20.08.2026 18:00" in tasks_flow.describe_schedule(task)
 
 
 def test_describe_schedule_recurring():

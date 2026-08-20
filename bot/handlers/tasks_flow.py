@@ -1,3 +1,5 @@
+from zoneinfo import ZoneInfo
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
@@ -10,10 +12,14 @@ from llm.classify import classify_message
 from llm.client import LLMUnavailableError
 
 
+def _format_local(due_at) -> str:
+    return due_at.astimezone(ZoneInfo(settings.timezone)).strftime("%d.%m.%Y %H:%M")
+
+
 def describe_schedule(task: Task) -> str:
     if task.recurrence_rule:
         return f"повторяется по расписанию ({task.recurrence_rule})"
-    return f"напомню {task.due_at.strftime('%d.%m.%Y %H:%M')} (UTC)"
+    return f"напомню {_format_local(task.due_at)}"
 
 
 async def create_task_from_text(user_id: int, text: str) -> Task | None:
@@ -102,7 +108,7 @@ async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             return
 
         for task in tasks:
-            when = task.due_at.strftime("%d.%m.%Y %H:%M") if task.due_at else task.recurrence_rule
+            when = _format_local(task.due_at) if task.due_at else task.recurrence_rule
             keyboard = InlineKeyboardMarkup(
                 [[InlineKeyboardButton("Отменить", callback_data=f"cancel_task:{task.id}")]]
             )

@@ -1,3 +1,5 @@
+from zoneinfo import ZoneInfo
+
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -16,7 +18,8 @@ def get_scheduler() -> AsyncIOScheduler:
     global _scheduler
     if _scheduler is None:
         _scheduler = AsyncIOScheduler(
-            jobstores={"default": SQLAlchemyJobStore(url=settings.database_url)}
+            jobstores={"default": SQLAlchemyJobStore(url=settings.database_url)},
+            timezone=ZoneInfo(settings.timezone),
         )
     return _scheduler
 
@@ -29,7 +32,7 @@ def schedule_task_reminder(task: Task) -> None:
     scheduler = get_scheduler()
 
     if task.recurrence_rule:
-        trigger = CronTrigger.from_crontab(task.recurrence_rule)
+        trigger = CronTrigger.from_crontab(task.recurrence_rule, timezone=ZoneInfo(settings.timezone))
     else:
         trigger = DateTrigger(run_date=task.due_at)
 

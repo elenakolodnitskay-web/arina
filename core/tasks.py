@@ -1,25 +1,29 @@
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
+from config import settings
 from llm.client import complete
 
 PARSE_MODEL = "anthropic/claude-haiku-4.5"
 
 SYSTEM_PROMPT_TEMPLATE = """Ты разбираешь свободную формулировку задачи или напоминания \
-на структурированные поля. Текущее время (UTC): {now}.
+на структурированные поля. Текущее время (по местному времени пользователя, смещение \
+от UTC уже учтено): {now}.
 
 Ответь строго JSON без пояснений и без markdown-разметки, в формате:
 {{"title": "короткая формулировка задачи в повелительном наклонении", \
-"due_at": "ISO 8601 дата-время в UTC для разовой задачи или null", \
+"due_at": "ISO 8601 дата-время для разовой задачи или null — используй то же \
+смещение от UTC, что и в текущем времени выше, НЕ переводи в UTC самостоятельно", \
 "recurrence_rule": "cron-выражение из 5 полей (минута час день месяц день_недели) \
-для повторяющейся задачи, или null для разовой"}}
+для повторяющейся задачи, по тому же местному времени, или null для разовой"}}
 
-Примеры: "завтра в 18:00" -> due_at на завтра 18:00 (переведи в UTC от текущего \
-времени), recurrence_rule null. "каждый понедельник в 9" -> due_at null, \
-recurrence_rule "0 9 * * 1". "через час" -> due_at = текущее время + 1 час, \
-recurrence_rule null.
+Примеры: "завтра в 18:00" -> due_at на завтра 18:00 по местному времени (то же \
+смещение, что в текущем времени), recurrence_rule null. "каждый понедельник в 9" -> \
+due_at null, recurrence_rule "0 9 * * 1" (9 утра по местному времени). "через час" \
+-> due_at = текущее время + 1 час, recurrence_rule null.
 
 Важно про неоднозначные числа вида "13.06" или "13.30": без явного слова "завтра", \
 названия месяца или года — это почти всегда время (13:06 или 13:30 сегодня, если \
@@ -46,7 +50,7 @@ def _extract_json(raw: str) -> dict:
 
 
 async def parse_task(text: str) -> ParsedTask:
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(ZoneInfo(settings.timezone)).isoformat()
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE.format(now=now)},
         {"role": "user", "content": text},
