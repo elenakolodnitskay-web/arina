@@ -3,6 +3,7 @@ from telegram.ext import ContextTypes
 
 from bot.handlers.documents_flow import start_document_draft
 from bot.handlers.finance_flow import record_finance_message
+from bot.handlers.relay_flow import start_relay_draft
 from bot.handlers.tasks_flow import EDIT_PENDING_KEY, apply_task_edit, create_task_from_text, describe_schedule
 from config import settings
 from core.dialog_summary import get_summary, record_message
@@ -111,6 +112,12 @@ async def _process_text(
             # generate_document всегда выдаёт какой-то черновик на подтверждение
             # (ошибки сети start_document_draft уже обрабатывает сама).
             await start_document_draft(update, context, text)
+            return
+
+        elif intent == Intent.relay:
+            # start_relay_draft сама отвечает пользователю в любом исходе (нет
+            # @username, получатель не найден, всё ок) — ошибки сети тоже сама.
+            await start_relay_draft(update, context, text)
             return
 
         result = await classify_message(text)

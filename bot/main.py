@@ -25,6 +25,12 @@ from bot.handlers.free_chat import (
     handle_voice_message,
 )
 from bot.handlers.onboarding import cancel, delete_my_data, help_command, receive_profile, start
+from bot.handlers.relay_flow import (
+    CONFIRM_CALLBACK as RELAY_CONFIRM_CALLBACK,
+    REFORMULATE_CALLBACK as RELAY_REFORMULATE_CALLBACK,
+    handle_confirm_relay,
+    handle_reformulate_relay,
+)
 from bot.handlers.tasks_flow import create_task, handle_cancel_task, handle_edit_task_button, list_tasks
 from bot.states import OnboardingState
 from config import settings
@@ -97,6 +103,12 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_confirm_document, pattern=rf"^{CONFIRM_CALLBACK}$"))
     application.add_handler(
         CallbackQueryHandler(handle_reformulate_document, pattern=rf"^{REFORMULATE_CALLBACK}$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(handle_confirm_relay, pattern=rf"^{RELAY_CONFIRM_CALLBACK}$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(handle_reformulate_relay, pattern=rf"^{RELAY_REFORMULATE_CALLBACK}$")
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))

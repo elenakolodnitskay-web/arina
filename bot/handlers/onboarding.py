@@ -25,6 +25,10 @@ HELP_TEXT = (
     "«напиши письмо клиенту...», «составь смету расходов...». Покажу черновик на "
     "подтверждение, а после — пришлю настоящий файл: Word, Excel или PDF, смотря "
     "что подходит по смыслу.\n\n"
+    "— Могу передать сообщение другому пользователю Арины по @username, если он "
+    "тоже здесь зарегистрирован («передай @ivan_petrov, что встреча переносится») "
+    "— покажу черновик на подтверждение и явно укажу получателю, что сообщение от "
+    "вас через Арину.\n\n"
     "— Помню контекст разговора, не нужно повторно объяснять то, что уже "
     "обсуждали.\n\n"
     "— /delete_my_data — полностью удалю все ваши данные."
@@ -43,6 +47,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     with SessionLocal() as session:
         user = session.query(User).filter_by(telegram_id=telegram_id).one_or_none()
         if user is not None and user.onboarding_completed:
+            user.username = update.effective_user.username
+            session.commit()
             await update.message.reply_text("С возвращением! Чем могу помочь?")
             return ConversationHandler.END
 
@@ -65,6 +71,7 @@ async def receive_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             session.add(user)
         user.profile_summary = profile_text
         user.onboarding_completed = True
+        user.username = update.effective_user.username
         session.commit()
 
     await update.message.reply_text(

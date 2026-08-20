@@ -40,6 +40,12 @@ class User(Base):
     # красоты — уникальность обеспечивается парой (platform, telegram_id).
     telegram_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
     platform: Mapped[str] = mapped_column(String(16), default="telegram", server_default="telegram")
+    # @username в Telegram — не зашифровано (нужно искать по точному совпадению, а
+    # шифрование Fernet не детерминированное — WHERE по зашифрованному полю не
+    # сработает, та же причина, что и у telegram_id/platform выше). Обновляется при
+    # каждом /start — может немного отставать, если пользователь сменил username и
+    # не перезапускал бота (известное упрощение, см. Plan.md Фаза 17).
+    username: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     onboarding_completed: Mapped[bool] = mapped_column(default=False)
     profile_summary: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)

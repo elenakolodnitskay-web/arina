@@ -42,6 +42,15 @@ async def test_detect_intent_document(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_detect_intent_relay(monkeypatch):
+    monkeypatch.setattr(intent, "complete", AsyncMock(return_value='{"intent": "relay"}'))
+
+    result = await intent.detect_intent("передай @ivan_petrov, что встреча переносится")
+
+    assert result == intent.Intent.relay
+
+
+@pytest.mark.asyncio
 async def test_detect_intent_parses_markdown_wrapped_json(monkeypatch):
     raw = '```json\n{"intent": "task"}\n```'
     monkeypatch.setattr(intent, "complete", AsyncMock(return_value=raw))

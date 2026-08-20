@@ -26,9 +26,10 @@ def allowed_user(monkeypatch):
     monkeypatch.setattr(settings, "allowed_user_ids", "111")
 
 
-def make_update(telegram_id: int, text: str | None = None):
+def make_update(telegram_id: int, text: str | None = None, username: str | None = None):
     update = MagicMock()
     update.effective_user.id = telegram_id
+    update.effective_user.username = username
     update.message.text = text
     update.message.reply_text = AsyncMock()
     return update
@@ -71,8 +72,24 @@ async def test_start_welcomes_back_completed_user(db_session_factory, allowed_us
 
 
 @pytest.mark.asyncio
+async def test_start_refreshes_username_for_returning_user(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True, username="old_name"))
+        session.commit()
+
+    update = make_update(telegram_id=111, username="new_name")
+    await onboarding.start(update, context=None)
+
+    with db_session_factory() as session:
+        user = session.query(User).filter_by(telegram_id=111).one()
+        assert user.username == "new_name"
+
+
+@pytest.mark.asyncio
 async def test_receive_profile_saves_encrypted_profile(db_session_factory, allowed_user):
-    update = make_update(telegram_id=111, text="фрилансер, веду проекты по дизайну и личные дела семьи")
+    update = make_update(
+        telegram_id=111, text="фрилансер, веду проекты по дизайну и личные дела семьи", username="ivan_petrov"
+    )
 
     result = await onboarding.receive_profile(update, context=None)
 
@@ -81,6 +98,7 @@ async def test_receive_profile_saves_encrypted_profile(db_session_factory, allow
         user = session.query(User).filter_by(telegram_id=111).one()
         assert user.onboarding_completed is True
         assert user.profile_summary == "фрилансер, веду проекты по дизайну и личные дела семьи"
+        assert user.username == "ivan_petrov"
 
         raw_value = session.connection().exec_driver_sql(
             "select profile_summary from users where id = ?", (user.id,)

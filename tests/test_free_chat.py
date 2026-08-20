@@ -221,6 +221,31 @@ async def test_handle_message_routes_document_intent_to_document_draft(
 
 
 @pytest.mark.asyncio
+async def test_handle_message_routes_relay_intent_to_relay_draft(
+    db_session_factory, allowed_user, chat_intent_by_default, no_real_reply, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    chat_intent_by_default.return_value = Intent.relay
+    relay_mock = AsyncMock()
+    monkeypatch.setattr(free_chat, "start_relay_draft", relay_mock)
+    classify_mock = AsyncMock()
+    monkeypatch.setattr(free_chat, "classify_message", classify_mock)
+
+    update = make_message_update(telegram_id=111, text="передай @ivan_petrov, что встреча переносится")
+    context = make_context()
+    await free_chat.handle_message(update, context)
+
+    relay_mock.assert_awaited_once_with(update, context, "передай @ivan_petrov, что встреча переносится")
+    classify_mock.assert_not_called()
+    no_real_reply.assert_not_called()
+    with db_session_factory() as session:
+        assert session.query(Note).count() == 0
+
+
+@pytest.mark.asyncio
 async def test_handle_message_falls_back_to_chat_when_finance_unparseable(
     db_session_factory, allowed_user, chat_intent_by_default, no_real_reply, monkeypatch
 ):
