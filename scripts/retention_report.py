@@ -1,16 +1,18 @@
 """Отчёт по retention закрытой беты (Фаза 9) — запускать вручную, не автоматизировано.
 
-Активностью пользователя считается создание Task/Note (не сам факт /start —
-он даёт только onboarding_completed=True). N-недельный retention здесь —
-упрощённая метрика "была ли активность не раньше, чем через N недель после
-первого использования", не скользящее окно.
+Активностью пользователя считается создание Task/Note/Transaction/EmailLog (не сам
+факт /start — он даёт только onboarding_completed=True). Пересылка сообщений другому
+пользователю (Фаза 17) не создаёт постоянной записи в БД по дизайну — не учитывается
+здесь, как и раньше не учитывался сам факт входа в чат. N-недельный retention здесь —
+упрощённая метрика "была ли активность не раньше, чем через N недель после первого
+использования", не скользящее окно.
 """
 
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
 
-from db.models import Note, Task, User
+from db.models import EmailLog, Note, Task, Transaction, User
 from db.session import SessionLocal
 
 
@@ -24,9 +26,11 @@ def classify_retention(cohort_start: datetime, last_active: datetime | None, now
 
 
 def last_activity_at(session, user_id: int) -> datetime | None:
-    note_ts = session.query(func.max(Note.created_at)).filter_by(user_id=user_id).scalar()
-    task_ts = session.query(func.max(Task.created_at)).filter_by(user_id=user_id).scalar()
-    timestamps = [ts for ts in (note_ts, task_ts) if ts is not None]
+    timestamps = [
+        session.query(func.max(model.created_at)).filter_by(user_id=user_id).scalar()
+        for model in (Note, Task, Transaction, EmailLog)
+    ]
+    timestamps = [ts for ts in timestamps if ts is not None]
     return max(timestamps) if timestamps else None
 
 
