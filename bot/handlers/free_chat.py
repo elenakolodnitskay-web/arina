@@ -7,7 +7,7 @@ from bot.handlers.finance_flow import record_finance_message
 from bot.handlers.relay_flow import start_relay_draft
 from bot.handlers.tasks_flow import EDIT_PENDING_KEY, apply_task_edit, create_task_from_text, describe_schedule
 from config import settings
-from core.dialog_summary import get_summary, record_message
+from core.dialog_summary import get_recent_context
 from db.models import Context, Note, User
 from db.session import SessionLocal
 from llm.classify import classify_message
@@ -127,8 +127,8 @@ async def _process_text(
             return
 
         result = await classify_message(text)
-        summary = get_summary(user_id, result.context)
-        reply_text = await generate_reply(text, result.context, summary)
+        recent_context = get_recent_context(user_id, result.context)
+        reply_text = await generate_reply(text, result.context, recent_context)
     except LLMUnavailableError as exc:
         await update.message.reply_text(str(exc))
         return
@@ -138,8 +138,6 @@ async def _process_text(
         session.add(note)
         session.commit()
         note_id = note.id
-
-    await record_message(user_id, result.context)
 
     keyboard = InlineKeyboardMarkup(
         [

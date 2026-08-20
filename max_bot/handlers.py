@@ -1,8 +1,8 @@
 from bot.handlers.onboarding import HELP_TEXT
 from bot.handlers.tasks_flow import create_task_from_text, describe_schedule
 from config import settings
-from core.dialog_summary import get_summary, record_message
-from db.models import DialogSummary, Note, Task, User
+from core.dialog_summary import get_recent_context
+from db.models import EmailLog, Note, Task, Transaction, User
 from db.session import SessionLocal
 from llm.classify import classify_message
 from llm.client import LLMUnavailableError
@@ -77,8 +77,8 @@ async def handle_text_message(external_user_id: int, text: str) -> None:
                 return
 
         result = await classify_message(text)
-        summary = get_summary(user_id, result.context)
-        reply_text = await generate_reply(text, result.context, summary)
+        recent_context = get_recent_context(user_id, result.context)
+        reply_text = await generate_reply(text, result.context, recent_context)
     except LLMUnavailableError as exc:
         await send_message(external_user_id, str(exc))
         return
@@ -87,7 +87,6 @@ async def handle_text_message(external_user_id: int, text: str) -> None:
         session.add(Note(user_id=user_id, content=text, context=result.context))
         session.commit()
 
-    await record_message(user_id, result.context)
     await send_message(external_user_id, reply_text)
 
 
@@ -95,7 +94,8 @@ async def _delete_my_data(external_user_id: int, user_id: int) -> None:
     with SessionLocal() as session:
         session.query(Task).filter_by(user_id=user_id).delete()
         session.query(Note).filter_by(user_id=user_id).delete()
-        session.query(DialogSummary).filter_by(user_id=user_id).delete()
+        session.query(Transaction).filter_by(user_id=user_id).delete()
+        session.query(EmailLog).filter_by(user_id=user_id).delete()
         session.query(User).filter_by(id=user_id).delete()
         session.commit()
 

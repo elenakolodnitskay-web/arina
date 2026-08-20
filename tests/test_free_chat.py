@@ -30,10 +30,9 @@ def allowed_user(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def no_real_dialog_summary(monkeypatch):
-    mock = AsyncMock()
-    monkeypatch.setattr(free_chat, "record_message", mock)
-    monkeypatch.setattr(free_chat, "get_summary", MagicMock(return_value=None))
+def no_real_recent_context(monkeypatch):
+    mock = MagicMock(return_value=None)
+    monkeypatch.setattr(free_chat, "get_recent_context", mock)
     return mock
 
 
@@ -90,7 +89,7 @@ async def test_handle_message_prompts_start_for_unonboarded_user(db_session_fact
 
 @pytest.mark.asyncio
 async def test_handle_message_saves_classified_note(
-    db_session_factory, allowed_user, no_real_dialog_summary, no_real_reply, monkeypatch
+    db_session_factory, allowed_user, no_real_recent_context, no_real_reply, monkeypatch
 ):
     with db_session_factory() as session:
         user = User(telegram_id=111, onboarding_completed=True)
@@ -112,7 +111,7 @@ async def test_handle_message_saves_classified_note(
         assert note.content == "отправить отчёт клиенту"
         assert note.context == Context.work
 
-    no_real_dialog_summary.assert_awaited_once_with(user_id, Context.work)
+    no_real_recent_context.assert_called_once_with(user_id, Context.work)
     no_real_reply.assert_awaited_once_with("отправить отчёт клиенту", Context.work, None)
 
     update.message.reply_text.assert_awaited_once()
@@ -121,8 +120,8 @@ async def test_handle_message_saves_classified_note(
 
 
 @pytest.mark.asyncio
-async def test_handle_message_passes_existing_summary_into_reply(
-    db_session_factory, allowed_user, no_real_reply, monkeypatch
+async def test_handle_message_passes_recent_context_into_reply(
+    db_session_factory, allowed_user, no_real_reply, no_real_recent_context, monkeypatch
 ):
     with db_session_factory() as session:
         session.add(User(telegram_id=111, onboarding_completed=True))
@@ -133,12 +132,14 @@ async def test_handle_message_passes_existing_summary_into_reply(
         "classify_message",
         AsyncMock(return_value=ClassificationResult(context=Context.personal, confidence=0.7)),
     )
-    monkeypatch.setattr(free_chat, "get_summary", MagicMock(return_value="ранее обсуждали поездку"))
+    no_real_recent_context.return_value = "вчера обсуждали поездку в отпуск"
 
     update = make_message_update(telegram_id=111, text="что там с поездкой")
     await free_chat.handle_message(update, make_context())
 
-    no_real_reply.assert_awaited_once_with("что там с поездкой", Context.personal, "ранее обсуждали поездку")
+    no_real_reply.assert_awaited_once_with(
+        "что там с поездкой", Context.personal, "вчера обсуждали поездку в отпуск"
+    )
 
 
 @pytest.mark.asyncio

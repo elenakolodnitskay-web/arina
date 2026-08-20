@@ -3,7 +3,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from bot.states import OnboardingState
 from config import settings
-from db.models import DialogSummary, Note, Task, User
+from db.models import EmailLog, Note, Task, Transaction, User
 from db.session import SessionLocal
 
 HELP_TEXT = (
@@ -111,7 +111,8 @@ async def delete_my_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         session.query(Task).filter_by(user_id=user.id).delete()
         session.query(Note).filter_by(user_id=user.id).delete()
-        session.query(DialogSummary).filter_by(user_id=user.id).delete()
+        session.query(Transaction).filter_by(user_id=user.id).delete()
+        session.query(EmailLog).filter_by(user_id=user.id).delete()
         session.delete(user)
         session.commit()
 

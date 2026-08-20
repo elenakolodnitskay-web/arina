@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from db.models import Base, Context, DialogSummary, Note, Task, User
+from db.models import Base, Context, EmailLog, Note, Task, Transaction, User
 from llm.classify import ClassificationResult
 from llm.client import LLMUnavailableError
 from llm.intent import Intent
@@ -36,9 +36,8 @@ def no_real_send(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def no_real_dialog_summary(monkeypatch):
-    monkeypatch.setattr(handlers, "record_message", AsyncMock())
-    monkeypatch.setattr(handlers, "get_summary", MagicMock(return_value=None))
+def no_real_recent_context(monkeypatch):
+    monkeypatch.setattr(handlers, "get_recent_context", MagicMock(return_value=None))
 
 
 @pytest.mark.asyncio
@@ -148,7 +147,8 @@ async def test_delete_my_data_removes_everything(db_session_factory, allowed_use
         session.flush()
         session.add(Task(user_id=user.id, title="задача", context=Context.work))
         session.add(Note(user_id=user.id, content="заметка", context=Context.work))
-        session.add(DialogSummary(user_id=user.id, context=Context.work))
+        session.add(Transaction(user_id=user.id, amount=100, transaction_type="expense"))
+        session.add(EmailLog(user_id=user.id, recipient_email="a@b.com", subject="тема", body="текст"))
         session.commit()
 
     await handlers.handle_text_message(555, "/delete_my_data")
@@ -157,5 +157,6 @@ async def test_delete_my_data_removes_everything(db_session_factory, allowed_use
         assert session.query(User).count() == 0
         assert session.query(Task).count() == 0
         assert session.query(Note).count() == 0
-        assert session.query(DialogSummary).count() == 0
+        assert session.query(Transaction).count() == 0
+        assert session.query(EmailLog).count() == 0
     no_real_send.assert_awaited_once_with(555, "Все ваши данные удалены.")

@@ -1,11 +1,9 @@
-from unittest.mock import AsyncMock
-
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from core import dialog_summary
-from db.models import Base, Context, DialogSummary, Note, User
+from db.models import Base, Context, Note, User
 
 
 @pytest.fixture()
@@ -27,74 +25,55 @@ def user_id(db_session_factory):
         return user.id
 
 
-def test_get_summary_returns_none_when_no_row(db_session_factory, user_id):
-    assert dialog_summary.get_summary(user_id, Context.work) is None
+def test_get_recent_context_returns_none_without_notes(db_session_factory, user_id):
+    assert dialog_summary.get_recent_context(user_id, Context.work) is None
 
 
-@pytest.mark.asyncio
-async def test_record_message_increments_counter_without_resummarizing(
-    db_session_factory, user_id, monkeypatch
-):
-    fake_complete = AsyncMock()
-    monkeypatch.setattr(dialog_summary, "complete", fake_complete)
-
-    for _ in range(dialog_summary.MESSAGE_THRESHOLD - 1):
-        await dialog_summary.record_message(user_id, Context.work)
-
-    fake_complete.assert_not_called()
+def test_get_recent_context_returns_notes_in_chronological_order(db_session_factory, user_id):
     with db_session_factory() as session:
-        row = session.query(DialogSummary).filter_by(user_id=user_id, context=Context.work).one()
-        assert row.message_count_since_update == dialog_summary.MESSAGE_THRESHOLD - 1
-        assert row.summary_text is None
-
-
-@pytest.mark.asyncio
-async def test_record_message_resummarizes_at_threshold(db_session_factory, user_id, monkeypatch):
-    monkeypatch.setattr(dialog_summary, "complete", AsyncMock(return_value="новое краткое summary"))
-
-    with db_session_factory() as session:
-        for text in ["первое сообщение", "второе сообщение"]:
+        for text in ["первое", "второе", "третье"]:
             session.add(Note(user_id=user_id, content=text, context=Context.work))
         session.commit()
 
-    for _ in range(dialog_summary.MESSAGE_THRESHOLD):
-        await dialog_summary.record_message(user_id, Context.work)
+    result = dialog_summary.get_recent_context(user_id, Context.work)
 
+    assert result == "первое\nвторое\nтретье"
+
+
+def test_get_recent_context_keeps_contexts_separate(db_session_factory, user_id):
     with db_session_factory() as session:
-        row = session.query(DialogSummary).filter_by(user_id=user_id, context=Context.work).one()
-        assert row.summary_text == "новое краткое summary"
-        assert row.message_count_since_update == 0
+        session.add(Note(user_id=user_id, content="рабочее сообщение", context=Context.work))
+        session.add(Note(user_id=user_id, content="личное сообщение", context=Context.personal))
+        session.commit()
 
-    assert dialog_summary.get_summary(user_id, Context.work) == "новое краткое summary"
+    work_context = dialog_summary.get_recent_context(user_id, Context.work)
+    personal_context = dialog_summary.get_recent_context(user_id, Context.personal)
+
+    assert work_context == "рабочее сообщение"
+    assert personal_context == "личное сообщение"
 
 
-@pytest.mark.asyncio
-async def test_record_message_resets_counter_without_llm_call_if_no_notes(
-    db_session_factory, user_id, monkeypatch
-):
-    fake_complete = AsyncMock()
-    monkeypatch.setattr(dialog_summary, "complete", fake_complete)
-
-    for _ in range(dialog_summary.MESSAGE_THRESHOLD):
-        await dialog_summary.record_message(user_id, Context.work)
-
-    fake_complete.assert_not_called()
+def test_get_recent_context_limits_to_max_recent_messages(db_session_factory, user_id, monkeypatch):
+    monkeypatch.setattr(dialog_summary, "MAX_RECENT_MESSAGES", 3)
     with db_session_factory() as session:
-        row = session.query(DialogSummary).filter_by(user_id=user_id, context=Context.work).one()
-        assert row.message_count_since_update == 0
-        assert row.summary_text is None
+        for i in range(5):
+            session.add(Note(user_id=user_id, content=f"сообщение {i}", context=Context.work))
+        session.commit()
+
+    result = dialog_summary.get_recent_context(user_id, Context.work)
+
+    assert result == "сообщение 2\nсообщение 3\nсообщение 4"
 
 
-@pytest.mark.asyncio
-async def test_contexts_are_tracked_separately(db_session_factory, user_id, monkeypatch):
-    monkeypatch.setattr(dialog_summary, "complete", AsyncMock())
-
-    await dialog_summary.record_message(user_id, Context.work)
-    await dialog_summary.record_message(user_id, Context.personal)
-    await dialog_summary.record_message(user_id, Context.personal)
-
+def test_get_recent_context_truncates_to_char_budget(db_session_factory, user_id, monkeypatch):
+    monkeypatch.setattr(dialog_summary, "MAX_CONTEXT_CHARS", 10)
     with db_session_factory() as session:
-        work_row = session.query(DialogSummary).filter_by(user_id=user_id, context=Context.work).one()
-        personal_row = session.query(DialogSummary).filter_by(user_id=user_id, context=Context.personal).one()
-        assert work_row.message_count_since_update == 1
-        assert personal_row.message_count_since_update == 2
+        session.add(Note(user_id=user_id, content="короткое", context=Context.work))
+        session.add(Note(user_id=user_id, content="ещё одно длинное сообщение", context=Context.work))
+        session.commit()
+
+    full_text = "короткое\nещё одно длинное сообщение"
+    result = dialog_summary.get_recent_context(user_id, Context.work)
+
+    assert len(result) == 10
+    assert full_text.endswith(result)

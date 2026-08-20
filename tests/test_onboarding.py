@@ -128,7 +128,7 @@ async def test_help_command_rejects_non_whitelisted_user(db_session_factory, all
 
 @pytest.mark.asyncio
 async def test_delete_my_data_removes_user_and_related_rows(db_session_factory, allowed_user):
-    from db.models import Context, Note, Task
+    from db.models import Context, EmailLog, Note, Task, Transaction
 
     with db_session_factory() as session:
         user = User(telegram_id=111, onboarding_completed=True)
@@ -136,6 +136,8 @@ async def test_delete_my_data_removes_user_and_related_rows(db_session_factory, 
         session.flush()
         session.add(Task(user_id=user.id, title="задача", context=Context.personal))
         session.add(Note(user_id=user.id, content="заметка", context=Context.personal))
+        session.add(Transaction(user_id=user.id, amount=500, transaction_type="expense"))
+        session.add(EmailLog(user_id=user.id, recipient_email="a@b.com", subject="тема", body="текст"))
         session.commit()
 
     update = make_update(telegram_id=111)
@@ -145,6 +147,8 @@ async def test_delete_my_data_removes_user_and_related_rows(db_session_factory, 
         assert session.query(User).count() == 0
         assert session.query(Task).count() == 0
         assert session.query(Note).count() == 0
+        assert session.query(Transaction).count() == 0
+        assert session.query(EmailLog).count() == 0
     assert "удалены" in update.message.reply_text.await_args.args[0]
 
 
