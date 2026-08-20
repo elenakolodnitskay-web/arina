@@ -1,5 +1,7 @@
 python-telegram-bot>=20,<21
 openai
+httpx
+aiohttp
 SQLAlchemy>=2,<3
 alembic
 psycopg2-binary
@@ -8,3 +10,4 @@ APScheduler
 pydantic-settings
 pytest
 pytest-asyncio
+pytest-aiohttp

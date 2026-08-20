@@ -24,6 +24,7 @@ from bot.handlers.tasks_flow import create_task, handle_cancel_task, list_tasks
 from bot.states import OnboardingState
 from config import settings
 from core.scheduler import get_scheduler
+from max_bot.webhook import start_webhook_server
 
 # Только технические события (какой хендлер сработал, ошибки) — текст сообщений
 # пользователя и другие персональные данные в лог не попадают (152-ФЗ, см. CLAUDE.md).
@@ -41,6 +42,8 @@ logger = logging.getLogger(__name__)
 
 async def _on_startup(application: Application) -> None:
     get_scheduler().start()
+    if settings.max_bot_token:
+        await start_webhook_server()
 
 
 async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

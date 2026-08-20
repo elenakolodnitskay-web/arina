@@ -91,6 +91,10 @@ bot/
     free_chat.py                         # приём сообщений, классификация, коррекция
     tasks_flow.py                         # создание/просмотр задач, напоминания
     documents_flow.py                      # генерация документов + подтверждение
+max_bot/
+  client.py                                 # клиент Bot API MAX (мессенджер)
+  webhook.py                                 # приём вебхуков MAX (aiohttp)
+  handlers.py                                 # переиспользует llm/core/db, свой набор команд
 scripts/
   retention_report.py                       # отчёт по retention беты (Фаза 9)
 tests/

@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -26,9 +26,15 @@ class TaskStatus(str, enum.Enum):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("platform", "telegram_id", name="uq_users_platform_telegram_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
+    # Имя поля осталось из Фазы 2 (когда была только Telegram) — теперь это внешний ID
+    # пользователя на любой платформе (для MAX сюда пишется MAX user id). Не
+    # переименовано, чтобы не тянуть массовое переименование по всему проекту ради
+    # красоты — уникальность обеспечивается парой (platform, telegram_id).
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
+    platform: Mapped[str] = mapped_column(String(16), default="telegram", server_default="telegram")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     onboarding_completed: Mapped[bool] = mapped_column(default=False)
     profile_summary: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)

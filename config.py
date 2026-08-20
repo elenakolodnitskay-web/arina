@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     openrouter_api_key: str
     fernet_key: str
     allowed_user_ids: str = ""
+    # MAX (мессенджер) — необязательные, пусты по умолчанию: без токена вебхук-сервер
+    # MAX просто не запускается (см. bot/main.py), остальной бот работает как раньше.
+    max_bot_token: str = ""
+    max_webhook_secret: str = ""
+    max_webhook_port: int = 8091
 
     @property
     def allowed_user_ids_list(self) -> list[int]:

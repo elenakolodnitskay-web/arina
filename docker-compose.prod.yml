@@ -18,6 +18,10 @@ services:
   bot:
     build: .
     env_file: .env
+    ports:
+      # Только на localhost — наружу торчит через nginx (см. DEPLOY.md, раздел MAX).
+      # Порт слушается только если задан MAX_BOT_TOKEN (см. bot/main.py).
+      - "127.0.0.1:8091:8091"
     depends_on:
       postgres:
         condition: service_healthy

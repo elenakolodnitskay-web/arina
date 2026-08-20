@@ -57,8 +57,15 @@ async def send_reminder(task_id: int) -> None:
             return
         user = session.get(User, task.user_id)
         title = task.title
-        chat_id = user.telegram_id
+        external_id = user.telegram_id
+        platform = user.platform
+
+    if platform == "max":
+        from max_bot.client import send_message as max_send_message
+
+        await max_send_message(external_id, f"Напоминание: {title}")
+        return
 
     bot = Bot(token=settings.telegram_bot_token)
     async with bot:
-        await bot.send_message(chat_id=chat_id, text=f"Напоминание: {title}")
+        await bot.send_message(chat_id=external_id, text=f"Напоминание: {title}")

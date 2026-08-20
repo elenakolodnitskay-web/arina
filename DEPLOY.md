@@ -74,6 +74,40 @@ telegram.ext.Application - INFO - Application started
 docker compose -f docker-compose.prod.yml exec bot python scripts/retention_report.py
 ```
 
+## 6. MAX (мессенджер) — опционально
+
+Добавлена 2026-08-20, вне пронумерованных фаз плана — MVP-срез (нет пока инлайн-кнопок
+коррекции, `/tasks`, `/document`; есть онбординг, свободный чат с автоклассификацией,
+задачи/напоминания естественным языком, `/help`, `/delete_my_data`). Подробности и
+известные упрощения — в `Plan.md`.
+
+1. Токен: в MAX найти `@MasterBot` → `/create` → задать имя (оканчивается на `_bot`)
+   → получить токен. Вписать в `.env` как `MAX_BOT_TOKEN`, придумать `MAX_WEBHOOK_SECRET`
+   (произвольная строка).
+2. Нужен публичный HTTPS-адрес — переиспользуем существующий бесплатный домен вида
+   `<ip-через-дефисы>.sslip.io` (резолвится в IP сервера без покупки домена) и уже
+   выпущенный для него Let's Encrypt сертификат, если такой уже есть на сервере (было
+   так на момент написания — см. `/etc/letsencrypt/live/`). Добавить в существующий
+   nginx-конфиг с `listen 443 ssl` для этого домена новый `location`, ничего в
+   остальном конфиге не трогая:
+   ```nginx
+   location /arina-max/ {
+       proxy_pass http://127.0.0.1:8091/webhook;
+       proxy_set_header Host $host;
+   }
+   ```
+   Проверить `nginx -t`, затем `systemctl reload nginx`.
+3. После `docker compose -f docker-compose.prod.yml up -d --build` (контейнер `bot`
+   слушает `:8091` изнутри и наружу на `127.0.0.1:8091`, см. `docker-compose.prod.yml`)
+   зарегистрировать вебхук один раз:
+   ```bash
+   curl -X POST "https://platform-api2.max.ru/subscriptions" \
+     -H "Authorization: $MAX_BOT_TOKEN" -H "Content-Type: application/json" \
+     -d '{"url": "https://<домен>/arina-max/", "update_types": ["message_created"], "secret": "$MAX_WEBHOOK_SECRET"}'
+   ```
+4. Проверить логи контейнера — должна появиться строка `MAX webhook server started
+   on port 8091`. Написать боту в MAX — должен пройти тот же онбординг, что в Telegram.
+
 ## Обновление после новых коммитов
 
 ```bash
