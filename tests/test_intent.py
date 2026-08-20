@@ -51,6 +51,15 @@ async def test_detect_intent_relay(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_detect_intent_email(monkeypatch):
+    monkeypatch.setattr(intent, "complete", AsyncMock(return_value='{"intent": "email"}'))
+
+    result = await intent.detect_intent("напиши на ivan@example.com, что оплата просрочена")
+
+    assert result == intent.Intent.email
+
+
+@pytest.mark.asyncio
 async def test_detect_intent_parses_markdown_wrapped_json(monkeypatch):
     raw = '```json\n{"intent": "task"}\n```'
     monkeypatch.setattr(intent, "complete", AsyncMock(return_value=raw))

@@ -105,3 +105,20 @@ class Transaction(Base):
     )
     description: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EmailLog(Base):
+    """Лог отправленных писем — не адресная книга: получатель не переиспользуется
+    для поиска (та же причина, что и у остальных EncryptedString-полей — Fernet не
+    детерминирован, WHERE по значению не сработает), каждый раз email указывается
+    заново в самом запросе. Хранится только как история/аудит для пользователя.
+    """
+
+    __tablename__ = "email_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    recipient_email: Mapped[str] = mapped_column(EncryptedString, nullable=False)
+    subject: Mapped[str] = mapped_column(EncryptedString, nullable=False)
+    body: Mapped[str] = mapped_column(EncryptedString, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -2,6 +2,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot.handlers.documents_flow import start_document_draft
+from bot.handlers.email_flow import start_email_draft
 from bot.handlers.finance_flow import record_finance_message
 from bot.handlers.relay_flow import start_relay_draft
 from bot.handlers.tasks_flow import EDIT_PENDING_KEY, apply_task_edit, create_task_from_text, describe_schedule
@@ -118,6 +119,11 @@ async def _process_text(
             # start_relay_draft сама отвечает пользователю в любом исходе (нет
             # @username, получатель не найден, всё ок) — ошибки сети тоже сама.
             await start_relay_draft(update, context, text)
+            return
+
+        elif intent == Intent.email:
+            # Аналогично relay — start_email_draft сама отвечает на любой исход.
+            await start_email_draft(update, context, text)
             return
 
         result = await classify_message(text)

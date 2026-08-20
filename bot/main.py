@@ -24,6 +24,12 @@ from bot.handlers.free_chat import (
     handle_unsupported_message,
     handle_voice_message,
 )
+from bot.handlers.email_flow import (
+    CONFIRM_CALLBACK as EMAIL_CONFIRM_CALLBACK,
+    REFORMULATE_CALLBACK as EMAIL_REFORMULATE_CALLBACK,
+    handle_confirm_email,
+    handle_reformulate_email,
+)
 from bot.handlers.onboarding import cancel, delete_my_data, help_command, receive_profile, start
 from bot.handlers.relay_flow import (
     CONFIRM_CALLBACK as RELAY_CONFIRM_CALLBACK,
@@ -109,6 +115,12 @@ def build_application() -> Application:
     )
     application.add_handler(
         CallbackQueryHandler(handle_reformulate_relay, pattern=rf"^{RELAY_REFORMULATE_CALLBACK}$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(handle_confirm_email, pattern=rf"^{EMAIL_CONFIRM_CALLBACK}$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(handle_reformulate_email, pattern=rf"^{EMAIL_REFORMULATE_CALLBACK}$")
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))

@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     max_bot_token: str = ""
     max_webhook_secret: str = ""
     max_webhook_port: int = 8091
+    # Отправка email-напоминаний контактам без Арины (Фаза 18) — транзакционный
+    # сервис Resend (REST API, не SMTP — см. Plan.md про выбор). Пусто по умолчанию:
+    # без ключа функция просто недоступна, остальной бот работает как обычно (тот
+    # же паттерн, что MAX_BOT_TOKEN выше).
+    resend_api_key: str = ""
+    email_from_address: str = ""
 
     @property
     def allowed_user_ids_list(self) -> list[int]:
