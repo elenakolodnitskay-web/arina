@@ -8,6 +8,7 @@ from bot.handlers import documents_flow
 from db.models import Base, Context, Note, User
 from llm.classify import ClassificationResult
 from llm.client import LLMUnavailableError
+from llm.documents import ParsedDocument
 
 
 @pytest.fixture()
@@ -43,6 +44,7 @@ def make_callback_update(telegram_id: int, callback_data: str, user_data: dict):
     update.callback_query.data = callback_data
     update.callback_query.answer = AsyncMock()
     update.callback_query.edit_message_text = AsyncMock()
+    update.callback_query.message.reply_document = AsyncMock()
     context = MagicMock()
     context.user_data = user_data
     return update, context
@@ -83,15 +85,15 @@ async def test_create_document_generates_draft_and_stores_pending(
         session.add(User(telegram_id=111, onboarding_completed=True))
         session.commit()
 
-    monkeypatch.setattr(
-        documents_flow, "generate_document", AsyncMock(return_value="Уважаемый коллега, ...")
-    )
+    draft = ParsedDocument(format="docx", title="Письмо коллеге", content="Уважаемый коллега, ...")
+    monkeypatch.setattr(documents_flow, "generate_document", AsyncMock(return_value=draft))
 
     update, context = make_command_update(111, ["письмо", "коллеге"])
     await documents_flow.create_document(update, context)
 
-    assert context.user_data[documents_flow.PENDING_KEY] == "Уважаемый коллега, ..."
+    assert context.user_data[documents_flow.PENDING_KEY] == draft
     assert "Уважаемый коллега, ..." in update.message.reply_text.await_args.args[0]
+    assert "Word" in update.message.reply_text.await_args.args[0]
     assert update.message.reply_text.await_args.kwargs["reply_markup"] is not None
 
 
@@ -123,7 +125,7 @@ async def test_handle_confirm_document_without_pending_draft(db_session_factory,
 
 
 @pytest.mark.asyncio
-async def test_handle_confirm_document_saves_note_and_clears_pending(
+async def test_handle_confirm_document_saves_note_and_sends_file(
     db_session_factory, allowed_user, monkeypatch
 ):
     with db_session_factory() as session:
@@ -135,9 +137,12 @@ async def test_handle_confirm_document_saves_note_and_clears_pending(
         "classify_message",
         AsyncMock(return_value=ClassificationResult(context=Context.work, confidence=0.85)),
     )
+    build_mock = MagicMock(return_value=(b"fake docx bytes", "Письмо клиенту.docx"))
+    monkeypatch.setattr(documents_flow, "build_document_file", build_mock)
 
+    draft = ParsedDocument(format="docx", title="Письмо клиенту", content="Готовый черновик письма")
     update, context = make_callback_update(
-        111, documents_flow.CONFIRM_CALLBACK, {documents_flow.PENDING_KEY: "Готовый черновик письма"}
+        111, documents_flow.CONFIRM_CALLBACK, {documents_flow.PENDING_KEY: draft}
     )
     await documents_flow.handle_confirm_document(update, context)
 
@@ -147,14 +152,17 @@ async def test_handle_confirm_document_saves_note_and_clears_pending(
         assert note.context == Context.work
 
     assert documents_flow.PENDING_KEY not in context.user_data
+    build_mock.assert_called_once_with("docx", "Письмо клиенту", "Готовый черновик письма")
     update.callback_query.edit_message_text.assert_awaited_once()
-    assert "Подтверждено" in update.callback_query.edit_message_text.await_args.args[0]
+    update.callback_query.message.reply_document.assert_awaited_once()
+    assert update.callback_query.message.reply_document.await_args.kwargs["filename"] == "Письмо клиенту.docx"
 
 
 @pytest.mark.asyncio
 async def test_handle_reformulate_document_clears_pending(db_session_factory, allowed_user):
+    draft = ParsedDocument(format="docx", title="старый", content="старый черновик")
     update, context = make_callback_update(
-        111, documents_flow.REFORMULATE_CALLBACK, {documents_flow.PENDING_KEY: "старый черновик"}
+        111, documents_flow.REFORMULATE_CALLBACK, {documents_flow.PENDING_KEY: draft}
     )
 
     await documents_flow.handle_reformulate_document(update, context)
@@ -162,3 +170,16 @@ async def test_handle_reformulate_document_clears_pending(db_session_factory, al
     assert documents_flow.PENDING_KEY not in context.user_data
     update.callback_query.edit_message_text.assert_awaited_once()
     assert "/document" in update.callback_query.edit_message_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_start_document_draft_prompts_start_for_unonboarded_user(db_session_factory, allowed_user):
+    update = MagicMock()
+    update.effective_user.id = 111
+    update.message.reply_text = AsyncMock()
+    context = MagicMock()
+    context.user_data = {}
+
+    await documents_flow.start_document_draft(update, context, "письмо клиенту")
+
+    assert "/start" in update.message.reply_text.await_args.args[0]

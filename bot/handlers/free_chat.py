@@ -1,6 +1,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from bot.handlers.documents_flow import start_document_draft
 from bot.handlers.finance_flow import record_finance_message
 from bot.handlers.tasks_flow import EDIT_PENDING_KEY, apply_task_edit, create_task_from_text, describe_schedule
 from config import settings
@@ -104,6 +105,13 @@ async def _process_text(
                 return
             # Модель решила, что это про деньги, но не смогла разобрать сумму/тип —
             # так же, как с task, ведём как обычный чат вместо "не понял".
+
+        elif intent == Intent.document:
+            # В отличие от task/finance, здесь нет случая "не смогла разобрать" —
+            # generate_document всегда выдаёт какой-то черновик на подтверждение
+            # (ошибки сети start_document_draft уже обрабатывает сама).
+            await start_document_draft(update, context, text)
+            return
 
         result = await classify_message(text)
         summary = get_summary(user_id, result.context)

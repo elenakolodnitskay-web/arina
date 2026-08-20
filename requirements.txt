@@ -8,6 +8,10 @@ psycopg2-binary
 cryptography
 APScheduler
 pydantic-settings
+python-docx
+openpyxl
+reportlab
 pytest
 pytest-asyncio
 pytest-aiohttp
+pypdf

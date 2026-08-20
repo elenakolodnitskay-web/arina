@@ -1,3 +1,7 @@
+import json
+import re
+from dataclasses import dataclass
+
 from llm.client import complete
 
 # Для документов/писем — более сильная модель, чем для классификации/разбора задач:
@@ -5,16 +9,48 @@ from llm.client import complete
 # подтверждения, см. спецификацию), а не скорость/цена.
 DOCUMENTS_MODEL = "anthropic/claude-sonnet-4.5"
 
-SYSTEM_PROMPT = """Ты помогаешь пользователю написать письмо или документ с нуля по \
-словесному описанию. Напиши готовый черновик текста на русском языке — без \
-пояснений, без markdown-разметки, без мета-комментариев о том, что ты сделал. \
-Только сам текст письма/документа, готовый к тому, чтобы пользователь его \
-отредактировал и использовал."""
+SYSTEM_PROMPT = """Ты помогаешь пользователю подготовить готовый документ по словесному \
+описанию. Сама определи подходящий формат файла, если пользователь явно не указал \
+другой: "docx" для писем, договоров, заявлений и вообще любого связного текста; \
+"xlsx" для таблиц, смет, списков расходов/данных по строкам и столбцам; "pdf" для \
+документов, которые обычно не редактируют после подготовки (счета, официальные \
+бланки). Если сомневаешься между docx и pdf — выбирай docx.
+
+Ответь строго JSON без пояснений и без markdown-разметки, в формате:
+{"format": "docx" | "xlsx" | "pdf", \
+"title": "короткое название документа (3-6 слов, будет использовано как имя файла)", \
+"content": "готовый текст документа на русском языке для docx/pdf — абзацы \
+разделены двойным переносом строки \\n\\n, без markdown-разметки и без \
+мета-комментариев о том, что ты сделал; ИЛИ для xlsx — таблица, где каждая строка \
+таблицы на отдельной строке текста, а ячейки внутри строки разделены символом |, \
+первая строка — заголовки столбцов"}"""
+
+_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
-async def generate_document(description: str) -> str:
+@dataclass
+class ParsedDocument:
+    format: str
+    title: str
+    content: str
+
+
+def _extract_json(raw: str) -> dict:
+    match = _JSON_BLOCK_RE.search(raw)
+    if match is None:
+        raise ValueError(f"Не удалось найти JSON в ответе модели: {raw!r}")
+    return json.loads(match.group(0))
+
+
+async def generate_document(description: str) -> ParsedDocument:
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": description},
     ]
-    return await complete(messages, model=DOCUMENTS_MODEL)
+    raw = await complete(messages, model=DOCUMENTS_MODEL)
+    data = _extract_json(raw)
+    return ParsedDocument(
+        format=data["format"],
+        title=data["title"],
+        content=data["content"],
+    )
