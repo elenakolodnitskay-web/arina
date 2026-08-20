@@ -1,6 +1,6 @@
 import logging
 
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -44,8 +44,18 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+BOT_COMMANDS = [
+    BotCommand("start", "Начать работу с Ариной"),
+    BotCommand("help", "Что умеет Арина"),
+    BotCommand("task", "Поставить задачу или напоминание"),
+    BotCommand("tasks", "Показать активные задачи"),
+    BotCommand("document", "Сгенерировать письмо или документ"),
+    BotCommand("delete_my_data", "Удалить все мои данные"),
+]
+
 
 async def _on_startup(application: Application) -> None:
+    await application.bot.set_my_commands(BOT_COMMANDS)
     get_scheduler().start()
     if settings.max_bot_token:
         await start_webhook_server()
