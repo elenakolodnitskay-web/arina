@@ -31,7 +31,10 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if telegram_id not in settings.allowed_user_ids_list:
         return
 
-    voice_file = await context.bot.get_file(update.message.voice.file_id)
+    # Голосовая заметка (микрофон) приходит как .voice, аудиофайл (например,
+    # пересланный из другого чата) — как .audio. Оба распознаём одинаково.
+    voice_or_audio = update.message.voice or update.message.audio
+    voice_file = await context.bot.get_file(voice_or_audio.file_id)
     audio_bytes = bytes(await voice_file.download_as_bytearray())
 
     try:
@@ -41,6 +44,22 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     await _process_text(telegram_id, text, update, context)
+
+
+async def handle_unsupported_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ловит форматы сообщений без отдельного хендлера (видеосообщение-кружок,
+    стикеры, фото и т.п.) — чтобы пользователь получал понятный ответ вместо
+    полного молчания бота, если формат не распознан ни одним из фильтров выше.
+    """
+    telegram_id = update.effective_user.id
+
+    if telegram_id not in settings.allowed_user_ids_list:
+        return
+
+    await update.message.reply_text(
+        "Пока не умею обрабатывать такой формат сообщения — напишите текстом или "
+        "пришлите голосовое (кнопка микрофона)."
+    )
 
 
 async def _process_text(

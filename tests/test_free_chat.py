@@ -303,6 +303,16 @@ def make_voice_update(telegram_id: int, file_id: str = "voice-file-id"):
     update = MagicMock()
     update.effective_user.id = telegram_id
     update.message.voice.file_id = file_id
+    update.message.audio = None
+    update.message.reply_text = AsyncMock()
+    return update
+
+
+def make_audio_update(telegram_id: int, file_id: str = "audio-file-id"):
+    update = MagicMock()
+    update.effective_user.id = telegram_id
+    update.message.voice = None
+    update.message.audio.file_id = file_id
     update.message.reply_text = AsyncMock()
     return update
 
@@ -369,6 +379,57 @@ async def test_handle_voice_message_reports_transcription_error(db_session_facto
     await free_chat.handle_voice_message(update, context)
 
     update.message.reply_text.assert_awaited_once_with("сеть недоступна")
+
+
+@pytest.mark.asyncio
+async def test_handle_voice_message_also_accepts_audio_file(
+    db_session_factory, allowed_user, no_real_reply, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(
+        free_chat,
+        "classify_message",
+        AsyncMock(return_value=ClassificationResult(context=Context.work, confidence=0.9)),
+    )
+    transcribe_mock = AsyncMock(return_value="отправить отчёт клиенту")
+    monkeypatch.setattr(free_chat, "transcribe_voice", transcribe_mock)
+
+    update = make_audio_update(telegram_id=111)
+    audio_file = MagicMock()
+    audio_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"raw mp3 bytes"))
+    context = make_context()
+    context.bot.get_file = AsyncMock(return_value=audio_file)
+
+    await free_chat.handle_voice_message(update, context)
+
+    context.bot.get_file.assert_awaited_once_with("audio-file-id")
+    transcribe_mock.assert_awaited_once_with(b"raw mp3 bytes")
+
+
+@pytest.mark.asyncio
+async def test_handle_unsupported_message_replies_with_hint(db_session_factory, allowed_user):
+    update = MagicMock()
+    update.effective_user.id = 111
+    update.message.reply_text = AsyncMock()
+
+    await free_chat.handle_unsupported_message(update, make_context())
+
+    update.message.reply_text.assert_awaited_once()
+    assert "формат" in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_unsupported_message_ignores_non_whitelisted_user(db_session_factory, allowed_user):
+    update = MagicMock()
+    update.effective_user.id = 999
+    update.message.reply_text = AsyncMock()
+
+    await free_chat.handle_unsupported_message(update, make_context())
+
+    update.message.reply_text.assert_not_called()
 
 
 @pytest.mark.asyncio
