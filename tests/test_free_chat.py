@@ -362,6 +362,23 @@ async def test_handle_message_reports_llm_unavailable_error(db_session_factory, 
 
 
 @pytest.mark.asyncio
+async def test_handle_message_reports_malformed_llm_response_gracefully(
+    db_session_factory, allowed_user, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(free_chat, "detect_intent", AsyncMock(side_effect=ValueError("bad json")))
+
+    update = make_message_update(telegram_id=111, text="привет")
+    await free_chat.handle_message(update, make_context())
+
+    update.message.reply_text.assert_awaited_once()
+    assert "переформулировать" in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_handle_message_applies_pending_task_edit(db_session_factory, allowed_user, monkeypatch):
     with db_session_factory() as session:
         user = User(telegram_id=111, onboarding_completed=True)
@@ -384,6 +401,33 @@ async def test_handle_message_applies_pending_task_edit(db_session_factory, allo
     detect_intent_mock.assert_not_called()
     assert free_chat.EDIT_PENDING_KEY not in context.user_data
     assert "обновлённая задача" in update.message.reply_text.await_args.args[0]
+    assert "⚠️" not in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_message_warns_when_task_edit_drops_recurrence(
+    db_session_factory, allowed_user, monkeypatch
+):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.commit()
+        user_id = user.id
+
+    fake_task = Task(id=7, user_id=user_id, title="созвон с командой", context=Context.work)
+    fake_task.recurrence_dropped = True
+    monkeypatch.setattr(free_chat, "apply_task_edit", AsyncMock(return_value=fake_task))
+    monkeypatch.setattr(free_chat, "describe_schedule", MagicMock(return_value="напомню завтра в 10:00"))
+    monkeypatch.setattr(free_chat, "detect_intent", AsyncMock())
+
+    update = make_message_update(telegram_id=111, text="перенеси на 10:00")
+    context = make_context({free_chat.EDIT_PENDING_KEY: 7})
+    await free_chat.handle_message(update, context)
+
+    reply = update.message.reply_text.await_args.args[0]
+    assert "созвон с командой" in reply
+    assert "⚠️" in reply
+    assert "повторяющейся" in reply
 
 
 @pytest.mark.asyncio
@@ -401,6 +445,24 @@ async def test_handle_message_reports_unparseable_task_edit(db_session_factory, 
     assert "без изменений" in update.message.reply_text.await_args.args[0]
     with db_session_factory() as session:
         assert session.query(Note).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_handle_message_reports_malformed_response_during_task_edit(
+    db_session_factory, allowed_user, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(free_chat, "apply_task_edit", AsyncMock(side_effect=KeyError("title")))
+
+    update = make_message_update(telegram_id=111, text="завтра в 10:00")
+    context = make_context({free_chat.EDIT_PENDING_KEY: 7})
+    await free_chat.handle_message(update, context)
+
+    update.message.reply_text.assert_awaited_once()
+    assert "без изменений" in update.message.reply_text.await_args.args[0]
 
 
 def make_voice_update(telegram_id: int, file_id: str = "voice-file-id"):

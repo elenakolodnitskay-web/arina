@@ -1,8 +1,7 @@
-import json
-import re
 from dataclasses import dataclass
 
 from llm.client import complete
+from llm.json_parse import extract_json
 
 PARSE_MODEL = "anthropic/claude-haiku-4.5"
 
@@ -15,20 +14,10 @@ Telegram по его @username, упомянутому в тексте. Извл
 Ответь строго JSON без пояснений и без markdown-разметки, в формате:
 {"username": "имя_без_собаки" | null, "message": "текст для пересылки"}"""
 
-_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
-
-
 @dataclass
 class ParsedRelay:
     username: str | None
     message: str
-
-
-def _extract_json(raw: str) -> dict:
-    match = _JSON_BLOCK_RE.search(raw)
-    if match is None:
-        raise ValueError(f"Не удалось найти JSON в ответе модели: {raw!r}")
-    return json.loads(match.group(0))
 
 
 async def parse_relay_message(text: str) -> ParsedRelay:
@@ -37,5 +26,5 @@ async def parse_relay_message(text: str) -> ParsedRelay:
         {"role": "user", "content": text},
     ]
     raw = await complete(messages, model=PARSE_MODEL)
-    data = _extract_json(raw)
+    data = extract_json(raw)
     return ParsedRelay(username=data.get("username"), message=data["message"])

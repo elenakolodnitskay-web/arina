@@ -68,6 +68,23 @@ async def test_start_relay_draft_reports_llm_unavailable(db_session_factory, all
 
 
 @pytest.mark.asyncio
+async def test_start_relay_draft_reports_malformed_llm_response_gracefully(
+    db_session_factory, allowed_user, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(relay_flow, "parse_relay_message", AsyncMock(side_effect=ValueError("bad json")))
+
+    update = make_text_update(111, "передай @ivan, привет")
+    await relay_flow.start_relay_draft(update, make_context(), "передай @ivan, привет")
+
+    update.message.reply_text.assert_awaited_once()
+    assert "переформулировать" in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_start_relay_draft_asks_for_username_when_missing(db_session_factory, allowed_user, monkeypatch):
     with db_session_factory() as session:
         session.add(User(telegram_id=111, onboarding_completed=True))

@@ -1,8 +1,7 @@
-import json
-import re
 from dataclasses import dataclass
 
 from llm.client import complete
+from llm.json_parse import extract_json
 
 # Для документов/писем — более сильная модель, чем для классификации/разбора задач:
 # здесь важно качество текста (репутационный риск ложится на пользователя после
@@ -25,21 +24,11 @@ SYSTEM_PROMPT = """Ты помогаешь пользователю подгот
 таблицы на отдельной строке текста, а ячейки внутри строки разделены символом |, \
 первая строка — заголовки столбцов"}"""
 
-_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
-
-
 @dataclass
 class ParsedDocument:
     format: str
     title: str
     content: str
-
-
-def _extract_json(raw: str) -> dict:
-    match = _JSON_BLOCK_RE.search(raw)
-    if match is None:
-        raise ValueError(f"Не удалось найти JSON в ответе модели: {raw!r}")
-    return json.loads(match.group(0))
 
 
 async def generate_document(description: str) -> ParsedDocument:
@@ -48,7 +37,7 @@ async def generate_document(description: str) -> ParsedDocument:
         {"role": "user", "content": description},
     ]
     raw = await complete(messages, model=DOCUMENTS_MODEL)
-    data = _extract_json(raw)
+    data = extract_json(raw)
     return ParsedDocument(
         format=data["format"],
         title=data["title"],

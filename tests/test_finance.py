@@ -66,8 +66,19 @@ async def test_parse_finance_message_returns_none_on_missing_amount(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_parse_finance_message_raises_on_unparseable_response(monkeypatch):
+async def test_parse_finance_message_returns_none_on_unparseable_response(monkeypatch):
     monkeypatch.setattr(finance, "complete", AsyncMock(return_value="непонятно что"))
 
-    with pytest.raises(ValueError):
-        await finance.parse_finance_message("что-то невнятное")
+    parsed = await finance.parse_finance_message("что-то невнятное")
+
+    assert parsed is None
+
+
+@pytest.mark.asyncio
+async def test_parse_finance_message_returns_none_on_non_numeric_amount(monkeypatch):
+    raw = '{"kind": "transaction", "amount": "пятьсот", "transaction_type": "expense", "category": null}'
+    monkeypatch.setattr(finance, "complete", AsyncMock(return_value=raw))
+
+    parsed = await finance.parse_finance_message("потратила пятьсот рублей")
+
+    assert parsed is None

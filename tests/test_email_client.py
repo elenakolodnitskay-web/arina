@@ -20,6 +20,11 @@ def configured_settings(monkeypatch):
     monkeypatch.setattr(email_client.settings, "email_from_address", "Арина <arina@example.com>")
 
 
+@pytest.fixture(autouse=True)
+def no_real_sleep(monkeypatch):
+    monkeypatch.setattr(email_client.asyncio, "sleep", AsyncMock())
+
+
 @pytest.mark.asyncio
 async def test_send_email_posts_to_resend_api(monkeypatch):
     fake_response = MagicMock(status_code=200)
@@ -58,6 +63,22 @@ async def test_send_email_raises_on_network_error(monkeypatch):
 
     with pytest.raises(email_client.EmailUnavailableError):
         await email_client.send_email("ivan@example.com", "Оплата", "Текст")
+
+    assert fake_client.post.await_count == email_client.MAX_RETRIES
+
+
+@pytest.mark.asyncio
+async def test_send_email_retries_transient_network_error_then_succeeds(monkeypatch):
+    fake_response = MagicMock(status_code=200)
+    fake_client = MagicMock()
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+    fake_client.post = AsyncMock(side_effect=[httpx.ConnectError("boom"), fake_response])
+    monkeypatch.setattr(email_client, "httpx", MagicMock(AsyncClient=MagicMock(return_value=fake_client)))
+
+    await email_client.send_email("ivan@example.com", "Оплата", "Текст")
+
+    assert fake_client.post.await_count == 2
 
 
 @pytest.mark.asyncio

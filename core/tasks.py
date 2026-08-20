@@ -1,11 +1,10 @@
-import json
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from config import settings
 from llm.client import complete
+from llm.json_parse import extract_json
 
 PARSE_MODEL = "anthropic/claude-haiku-4.5"
 
@@ -32,21 +31,11 @@ due_at null, recurrence_rule "0 9 * * 1" (9 утра по местному вр�
 месяц позже текущего времени, а в тексте не было явного указания на месяц/год, \
 скорее всего это ошибка интерпретации: перечитай формулировку как время, а не дату."""
 
-_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
-
-
 @dataclass
 class ParsedTask:
     title: str
     due_at: datetime | None
     recurrence_rule: str | None
-
-
-def _extract_json(raw: str) -> dict:
-    match = _JSON_BLOCK_RE.search(raw)
-    if match is None:
-        raise ValueError(f"Не удалось найти JSON в ответе модели: {raw!r}")
-    return json.loads(match.group(0))
 
 
 async def parse_task(text: str) -> ParsedTask:
@@ -56,7 +45,7 @@ async def parse_task(text: str) -> ParsedTask:
         {"role": "user", "content": text},
     ]
     raw = await complete(messages, model=PARSE_MODEL)
-    data = _extract_json(raw)
+    data = extract_json(raw)
 
     due_at = datetime.fromisoformat(data["due_at"]) if data.get("due_at") else None
     return ParsedTask(

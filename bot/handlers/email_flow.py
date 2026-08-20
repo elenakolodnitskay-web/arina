@@ -49,6 +49,9 @@ async def start_email_draft(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     except LLMUnavailableError as exc:
         await update.message.reply_text(str(exc))
         return
+    except (ValueError, KeyError):
+        await update.message.reply_text("Не поняла ответ модели — попробуйте переформулировать.")
+        return
 
     if not parsed.email:
         await update.message.reply_text(

@@ -140,6 +140,22 @@ async def test_llm_unavailable_is_reported(db_session_factory, allowed_user, no_
 
 
 @pytest.mark.asyncio
+async def test_malformed_llm_response_is_reported_gracefully(
+    db_session_factory, allowed_user, no_real_send, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=555, platform="max", onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(handlers, "detect_intent", AsyncMock(side_effect=ValueError("bad json")))
+
+    await handlers.handle_text_message(555, "что-то")
+
+    no_real_send.assert_awaited_once()
+    assert "переформулировать" in no_real_send.await_args.args[1]
+
+
+@pytest.mark.asyncio
 async def test_delete_my_data_removes_everything(db_session_factory, allowed_user, no_real_send):
     with db_session_factory() as session:
         user = User(telegram_id=555, platform="max", onboarding_completed=True)

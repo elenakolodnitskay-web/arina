@@ -53,6 +53,9 @@ async def start_relay_draft(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     except LLMUnavailableError as exc:
         await update.message.reply_text(str(exc))
         return
+    except (ValueError, KeyError):
+        await update.message.reply_text("Не поняла ответ модели — попробуйте переформулировать.")
+        return
 
     if not parsed.username:
         await update.message.reply_text(
@@ -61,7 +64,17 @@ async def start_relay_draft(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         return
 
     with SessionLocal() as session:
-        recipient = session.query(User).filter_by(username=parsed.username).one_or_none()
+        # first(), не one_or_none(): username не имеет уникального ограничения в БД
+        # (обновляется только на /start, см. Plan.md Фаза 17 про известное
+        # отставание) — теоретически два User могут временно совпасть по этому
+        # полю, если один сменил ник, а другой успел его занять. one_or_none() упал
+        # бы с MultipleResultsFound; берём самую свежую запись.
+        recipient = (
+            session.query(User)
+            .filter_by(username=parsed.username)
+            .order_by(User.id.desc())
+            .first()
+        )
 
     if (
         recipient is None
@@ -105,9 +118,18 @@ async def handle_confirm_relay(update: Update, context: ContextTypes.DEFAULT_TYP
 
     with SessionLocal() as session:
         recipient = session.get(User, pending.recipient_user_id)
-        if recipient is None:
+        # Та же тройная проверка, что и при создании черновика (start_relay_draft) —
+        # между черновиком и подтверждением получатель мог перестать быть доступным
+        # (выведен из ALLOWED_USER_IDS, ещё не завершил онбординг заново и т.п.), а
+        # доставка ограничена только пользователями Арины — это гарантия из
+        # постановки задачи, не просто UX на момент черновика.
+        if (
+            recipient is None
+            or recipient.telegram_id not in settings.allowed_user_ids_list
+            or not recipient.onboarding_completed
+        ):
             context.user_data.pop(PENDING_KEY, None)
-            await query.answer("Получатель больше не найден.", show_alert=True)
+            await query.answer("Получатель больше не доступен для пересылки.", show_alert=True)
             return
         recipient_telegram_id = recipient.telegram_id
 

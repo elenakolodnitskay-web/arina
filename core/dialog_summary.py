@@ -29,7 +29,15 @@ def get_recent_context(user_id: int, context: Context) -> str | None:
     if not notes:
         return None
 
-    text = "\n".join(note.content for note in reversed(notes))
-    if len(text) > MAX_CONTEXT_CHARS:
-        text = text[-MAX_CONTEXT_CHARS:]
-    return text
+    # notes идут от новых к старым — набираем самые свежие целиком, не разрезая
+    # ни одно сообщение посередине (raw text[-N:] мог обрезать самое старое из
+    # оставшихся сообщений на середине слова).
+    selected: list[str] = []
+    total_chars = 0
+    for note in notes:
+        if selected and total_chars + len(note.content) > MAX_CONTEXT_CHARS:
+            break
+        selected.append(note.content)
+        total_chars += len(note.content)
+
+    return "\n".join(reversed(selected))

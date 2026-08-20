@@ -47,6 +47,9 @@ async def start_document_draft(update: Update, context: ContextTypes.DEFAULT_TYP
     except LLMUnavailableError as exc:
         await update.message.reply_text(str(exc))
         return
+    except (ValueError, KeyError):
+        await update.message.reply_text("Не поняла ответ модели — попробуйте переформулировать.")
+        return
 
     context.user_data[PENDING_KEY] = draft
     format_label = FORMAT_LABELS.get(draft.format, draft.format)
@@ -81,6 +84,20 @@ async def handle_confirm_document(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("Черновик уже не актуален.", show_alert=True)
         return
 
+    # Собираем файл ДО записи в БД и до того, как убрать черновик из user_data —
+    # если формат от модели окажется невалидным (build_document_file поднимет
+    # ValueError), пользователь не должен остаться с сохранённой заметкой, но без
+    # файла и без возможности повторить подтверждение.
+    try:
+        file_bytes, filename = build_document_file(draft.format, draft.title, draft.content)
+    except ValueError:
+        context.user_data.pop(PENDING_KEY, None)
+        await query.answer()
+        await query.edit_message_text(
+            "Не получилось собрать файл — опишите документ ещё раз: /document <описание>."
+        )
+        return
+
     telegram_id = query.from_user.id
     try:
         classification = await classify_message(draft.content)
@@ -92,15 +109,13 @@ async def handle_confirm_document(update: Update, context: ContextTypes.DEFAULT_
     with SessionLocal() as session:
         user = session.query(User).filter_by(telegram_id=telegram_id).one_or_none()
         if user is None:
-            await query.answer("Не нашёл ваш профиль — напишите /start.", show_alert=True)
+            await query.answer("Не нашла ваш профиль — напишите /start.", show_alert=True)
             return
         note = Note(user_id=user.id, content=draft.content, context=classification.context)
         session.add(note)
         session.commit()
 
     context.user_data.pop(PENDING_KEY, None)
-    file_bytes, filename = build_document_file(draft.format, draft.title, draft.content)
-
     await query.answer()
     await query.edit_message_text("Подтверждено, отправляю файл.")
     await query.message.reply_document(document=io.BytesIO(file_bytes), filename=filename)

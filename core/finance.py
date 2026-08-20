@@ -1,8 +1,7 @@
-import json
-import re
 from dataclasses import dataclass
 
 from llm.client import complete
+from llm.json_parse import extract_json
 
 PARSE_MODEL = "anthropic/claude-haiku-4.5"
 
@@ -24,9 +23,6 @@ SYSTEM_PROMPT = """Ты разбираешь сообщение пользова
 "category": "короткое название категории/места/статьи (магазин, коммуналка, зарплата и т.п.)" \
 | null (заполняй только для kind="transaction")}"""
 
-_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
-
-
 @dataclass
 class ParsedFinance:
     kind: str
@@ -35,27 +31,25 @@ class ParsedFinance:
     category: str | None
 
 
-def _extract_json(raw: str) -> dict:
-    match = _JSON_BLOCK_RE.search(raw)
-    if match is None:
-        raise ValueError(f"Не удалось найти JSON в ответе модели: {raw!r}")
-    return json.loads(match.group(0))
-
-
 async def parse_finance_message(text: str) -> ParsedFinance | None:
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": text},
     ]
     raw = await complete(messages, model=PARSE_MODEL)
-    data = _extract_json(raw)
 
-    if data.get("kind") not in ("transaction", "balance", "threshold") or data.get("amount") is None:
+    # Любой сбой разбора (не JSON вовсе, сумма не числом и т.п.) — тот же исход,
+    # что и явно отсутствующие kind/amount ниже: None, откат к обычному чату, а не
+    # необработанное исключение до самого хендлера.
+    try:
+        data = extract_json(raw)
+        if data.get("kind") not in ("transaction", "balance", "threshold") or data.get("amount") is None:
+            return None
+        return ParsedFinance(
+            kind=data["kind"],
+            amount=float(data["amount"]),
+            transaction_type=data.get("transaction_type"),
+            category=data.get("category"),
+        )
+    except (ValueError, KeyError):
         return None
-
-    return ParsedFinance(
-        kind=data["kind"],
-        amount=float(data["amount"]),
-        transaction_type=data.get("transaction_type"),
-        category=data.get("category"),
-    )

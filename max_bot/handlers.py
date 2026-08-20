@@ -89,6 +89,9 @@ async def handle_text_message(external_user_id: int, text: str) -> None:
     except LLMUnavailableError as exc:
         await send_message(external_user_id, str(exc))
         return
+    except (ValueError, KeyError):
+        await send_message(external_user_id, "Не поняла ответ модели — попробуйте переформулировать.")
+        return
 
     with SessionLocal() as session:
         session.add(Note(user_id=user_id, content=text, context=result.context))

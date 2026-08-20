@@ -65,15 +65,33 @@ def test_get_recent_context_limits_to_max_recent_messages(db_session_factory, us
     assert result == "сообщение 2\nсообщение 3\nсообщение 4"
 
 
-def test_get_recent_context_truncates_to_char_budget(db_session_factory, user_id, monkeypatch):
-    monkeypatch.setattr(dialog_summary, "MAX_CONTEXT_CHARS", 10)
+def test_get_recent_context_drops_oldest_whole_messages_over_char_budget(
+    db_session_factory, user_id, monkeypatch
+):
+    monkeypatch.setattr(dialog_summary, "MAX_CONTEXT_CHARS", 15)
     with db_session_factory() as session:
-        session.add(Note(user_id=user_id, content="короткое", context=Context.work))
-        session.add(Note(user_id=user_id, content="ещё одно длинное сообщение", context=Context.work))
+        session.add(Note(user_id=user_id, content="старое длинное сообщение", context=Context.work))
+        session.add(Note(user_id=user_id, content="новое", context=Context.work))
         session.commit()
 
-    full_text = "короткое\nещё одно длинное сообщение"
     result = dialog_summary.get_recent_context(user_id, Context.work)
 
-    assert len(result) == 10
-    assert full_text.endswith(result)
+    # Старое сообщение целиком выброшено (не обрезано посередине) — остаётся
+    # только то, что помещается в бюджет целыми сообщениями.
+    assert result == "новое"
+
+
+def test_get_recent_context_always_keeps_most_recent_message_whole(
+    db_session_factory, user_id, monkeypatch
+):
+    monkeypatch.setattr(dialog_summary, "MAX_CONTEXT_CHARS", 5)
+    with db_session_factory() as session:
+        session.add(Note(user_id=user_id, content="это сообщение длиннее лимита", context=Context.work))
+        session.commit()
+
+    result = dialog_summary.get_recent_context(user_id, Context.work)
+
+    # Даже если самое свежее сообщение само по себе больше бюджета — оно не
+    # режется посередине, а входит целиком (защита от одного длинного сообщения
+    # не должна ломать единственное доступное сообщение).
+    assert result == "это сообщение длиннее лимита"

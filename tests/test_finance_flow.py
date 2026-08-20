@@ -27,6 +27,39 @@ def make_user(db_session_factory, **kwargs) -> int:
         return user.id
 
 
+@pytest.mark.parametrize(
+    "amount, expected",
+    [
+        (500, "500"),
+        (500.0, "500"),
+        (199.99, "199.99"),
+        (199.90, "199.9"),
+        (0.5, "0.5"),
+    ],
+)
+def test_format_amount_shows_exact_value_without_padding(amount, expected):
+    assert finance_flow._format_amount(amount) == expected
+
+
+@pytest.mark.asyncio
+async def test_record_finance_message_does_not_round_fractional_amount(db_session_factory, monkeypatch):
+    user_id = make_user(db_session_factory)
+    monkeypatch.setattr(
+        finance_flow,
+        "parse_finance_message",
+        AsyncMock(
+            return_value=ParsedFinance(
+                kind="transaction", amount=199.99, transaction_type="expense", category="аптека"
+            )
+        ),
+    )
+
+    reply = await finance_flow.record_finance_message(user_id, "потратила 199.99 в аптеке")
+
+    assert "199.99" in reply
+    assert "200" not in reply
+
+
 @pytest.mark.asyncio
 async def test_record_finance_message_saves_expense(db_session_factory, monkeypatch):
     user_id = make_user(db_session_factory)

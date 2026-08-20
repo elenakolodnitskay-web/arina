@@ -114,6 +114,23 @@ async def test_create_task_reports_llm_unavailable(db_session_factory, allowed_u
     update.message.reply_text.assert_awaited_once_with("сеть недоступна")
 
 
+@pytest.mark.asyncio
+async def test_create_task_reports_malformed_llm_response_gracefully(
+    db_session_factory, allowed_user, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(tasks_flow, "parse_task", AsyncMock(side_effect=ValueError("bad json")))
+
+    update, context = make_command_update(111, ["что-то"])
+    await tasks_flow.create_task(update, context)
+
+    update.message.reply_text.assert_awaited_once()
+    assert "переформулировать" in update.message.reply_text.await_args.args[0]
+
+
 def test_describe_schedule_one_off():
     # 15:00 UTC -> 18:00 по Москве (UTC+3, без перевода часов) — describe_schedule
     # показывает пользователю местное время, не сырое UTC из БД.
@@ -194,10 +211,45 @@ async def test_apply_task_edit_updates_existing_task(db_session_factory, allowed
     assert updated is not None
     assert updated.title == "новое название"
     assert updated.context == Context.personal
+    assert updated.recurrence_dropped is False
     with db_session_factory() as session:
         task = session.get(Task, task_id)
         assert task.title == "новое название"
     tasks_flow.schedule_task_reminder.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_apply_task_edit_flags_dropped_recurrence(db_session_factory, allowed_user, monkeypatch):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        task = Task(
+            user_id=user.id,
+            title="созвон с командой",
+            context=Context.work,
+            recurrence_rule="0 9 * * 1",
+        )
+        session.add(task)
+        session.commit()
+        user_id = user.id
+        task_id = task.id
+
+    # Пользователь описал только новое время, не упомянув повтор — реальный
+    # сценарий из находки код-ревью: "перенеси на 10:00" не содержит "каждый
+    # понедельник", и модель честно вернёт due_at без recurrence_rule.
+    parsed = ParsedTask(
+        title="созвон с командой", due_at=datetime(2026, 8, 21, 10, 0, tzinfo=timezone.utc), recurrence_rule=None
+    )
+    monkeypatch.setattr(tasks_flow, "parse_task", AsyncMock(return_value=parsed))
+    monkeypatch.setattr(
+        tasks_flow, "classify_message", AsyncMock(return_value=ClassificationResult(Context.work, 0.9))
+    )
+
+    updated = await tasks_flow.apply_task_edit(user_id, task_id, "перенеси на 10:00")
+
+    assert updated.recurrence_dropped is True
+    assert updated.recurrence_rule is None
 
 
 @pytest.mark.asyncio

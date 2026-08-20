@@ -1,8 +1,7 @@
-import json
-import re
 from enum import Enum
 
 from llm.client import complete
+from llm.json_parse import extract_json
 
 INTENT_MODEL = "anthropic/claude-haiku-4.5"
 
@@ -43,9 +42,6 @@ SYSTEM_PROMPT = """Ты определяешь намерение пользов
 Ответь строго JSON без пояснений и без markdown-разметки, в формате:
 {"intent": "task" | "finance" | "document" | "relay" | "email" | "chat"}"""
 
-_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
-
-
 class Intent(str, Enum):
     task = "task"
     finance = "finance"
@@ -55,18 +51,11 @@ class Intent(str, Enum):
     chat = "chat"
 
 
-def _extract_json(raw: str) -> dict:
-    match = _JSON_BLOCK_RE.search(raw)
-    if match is None:
-        raise ValueError(f"Не удалось найти JSON в ответе модели: {raw!r}")
-    return json.loads(match.group(0))
-
-
 async def detect_intent(text: str) -> Intent:
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": text},
     ]
     raw = await complete(messages, model=INTENT_MODEL)
-    data = _extract_json(raw)
+    data = extract_json(raw)
     return Intent(data["intent"])

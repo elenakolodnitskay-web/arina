@@ -115,6 +115,24 @@ async def test_create_document_reports_llm_unavailable(db_session_factory, allow
 
 
 @pytest.mark.asyncio
+async def test_create_document_reports_malformed_llm_response_gracefully(
+    db_session_factory, allowed_user, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(documents_flow, "generate_document", AsyncMock(side_effect=KeyError("format")))
+
+    update, context = make_command_update(111, ["письмо"])
+    await documents_flow.create_document(update, context)
+
+    update.message.reply_text.assert_awaited_once()
+    assert "переформулировать" in update.message.reply_text.await_args.args[0]
+    assert documents_flow.PENDING_KEY not in context.user_data
+
+
+@pytest.mark.asyncio
 async def test_handle_confirm_document_without_pending_draft(db_session_factory, allowed_user):
     update, context = make_callback_update(111, documents_flow.CONFIRM_CALLBACK, {})
 
@@ -156,6 +174,38 @@ async def test_handle_confirm_document_saves_note_and_sends_file(
     update.callback_query.edit_message_text.assert_awaited_once()
     update.callback_query.message.reply_document.assert_awaited_once()
     assert update.callback_query.message.reply_document.await_args.kwargs["filename"] == "Письмо клиенту.docx"
+
+
+@pytest.mark.asyncio
+async def test_handle_confirm_document_reports_invalid_format_without_saving_note(
+    db_session_factory, allowed_user, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    classify_mock = AsyncMock()
+    monkeypatch.setattr(documents_flow, "classify_message", classify_mock)
+    monkeypatch.setattr(
+        documents_flow, "build_document_file", MagicMock(side_effect=ValueError("bad format"))
+    )
+
+    draft = ParsedDocument(format="doc", title="Странный формат", content="текст")
+    update, context = make_callback_update(
+        111, documents_flow.CONFIRM_CALLBACK, {documents_flow.PENDING_KEY: draft}
+    )
+    await documents_flow.handle_confirm_document(update, context)
+
+    # Файл не собрался — заметка не должна была сохраниться, а classify_message не
+    # должен был даже вызываться (проверка формата идёт раньше по порядку).
+    classify_mock.assert_not_called()
+    with db_session_factory() as session:
+        assert session.query(Note).count() == 0
+
+    assert documents_flow.PENDING_KEY not in context.user_data
+    update.callback_query.edit_message_text.assert_awaited_once()
+    assert "/document" in update.callback_query.edit_message_text.await_args.args[0]
+    update.callback_query.message.reply_document.assert_not_awaited()
 
 
 @pytest.mark.asyncio

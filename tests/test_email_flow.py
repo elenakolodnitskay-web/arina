@@ -61,6 +61,21 @@ async def test_start_email_draft_reports_llm_unavailable(db_session_factory, mon
 
 
 @pytest.mark.asyncio
+async def test_start_email_draft_reports_malformed_llm_response_gracefully(db_session_factory, monkeypatch):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(email_flow, "parse_email_message", AsyncMock(side_effect=KeyError("email")))
+
+    update = make_text_update(111, "напиши на ivan@example.com про оплату")
+    await email_flow.start_email_draft(update, make_context(), "напиши на ivan@example.com про оплату")
+
+    update.message.reply_text.assert_awaited_once()
+    assert "переформулировать" in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_start_email_draft_asks_for_address_when_missing(db_session_factory, monkeypatch):
     with db_session_factory() as session:
         session.add(User(telegram_id=111, onboarding_completed=True))

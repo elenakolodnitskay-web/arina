@@ -83,11 +83,23 @@ async def _process_text(
         except LLMUnavailableError as exc:
             await update.message.reply_text(str(exc))
             return
+        except (ValueError, KeyError):
+            await update.message.reply_text(
+                "Не поняла ответ модели — задача осталась без изменений, попробуйте ещё раз."
+            )
+            return
 
         if task is None:
             await update.message.reply_text("Не поняла новое время — задача осталась без изменений.")
         else:
-            await update.message.reply_text(f"Обновила: «{task.title}» — {describe_schedule(task)}.")
+            reply = f"Обновила: «{task.title}» — {describe_schedule(task)}."
+            if getattr(task, "recurrence_dropped", False):
+                reply += (
+                    "\n⚠️ Задача была повторяющейся, теперь это разовое напоминание — "
+                    "если хотели просто сдвинуть время повтора, уточните формулировку, "
+                    "например «каждый понедельник в 10:00»."
+                )
+            await update.message.reply_text(reply)
         return
 
     try:
@@ -132,6 +144,9 @@ async def _process_text(
         reply_text = await generate_reply(text, result.context, recent_context, profile_summary)
     except LLMUnavailableError as exc:
         await update.message.reply_text(str(exc))
+        return
+    except (ValueError, KeyError):
+        await update.message.reply_text("Не поняла ответ модели — попробуйте переформулировать.")
         return
 
     with SessionLocal() as session:

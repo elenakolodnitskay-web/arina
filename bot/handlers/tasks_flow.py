@@ -75,6 +75,12 @@ async def apply_task_edit(user_id: int, task_id: int, text: str) -> Task | None:
         if task is None or task.user_id != user_id:
             return None
 
+        # Полный переразбор текста может не упомянуть повтор, даже если задача
+        # была повторяющейся (например, «перенеси на 10:00» — про время, не про
+        # то, что повтор нужно снять) — предупреждаем об этом переходе в ответе,
+        # чтобы пользователь не потерял регулярное напоминание незаметно.
+        recurrence_dropped = bool(task.recurrence_rule) and not parsed.recurrence_rule
+
         task.title = parsed.title
         task.context = classification.context
         task.due_at = parsed.due_at
@@ -82,6 +88,7 @@ async def apply_task_edit(user_id: int, task_id: int, text: str) -> Task | None:
         session.commit()
         schedule_task_reminder(task)  # replace_existing=True переставит триггер
         session.refresh(task)
+        task.recurrence_dropped = recurrence_dropped  # транзиентный атрибут, не колонка БД
         return task
 
 
@@ -109,6 +116,9 @@ async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         task = await create_task_from_text(user_id, text)
     except LLMUnavailableError as exc:
         await update.message.reply_text(str(exc))
+        return
+    except (ValueError, KeyError):
+        await update.message.reply_text("Не поняла ответ модели — попробуйте переформулировать.")
         return
 
     if task is None:
