@@ -324,7 +324,7 @@ async def test_handle_cancel_task_marks_cancelled(db_session_factory, allowed_us
         assert task.status == TaskStatus.cancelled
 
     tasks_flow.cancel_task_reminder.assert_called_once_with(task_id)
-    update.callback_query.edit_message_text.assert_awaited_once_with("Отменил.")
+    update.callback_query.edit_message_text.assert_awaited_once_with("Отменила.")
 
 
 @pytest.mark.asyncio

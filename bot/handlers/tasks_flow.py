@@ -112,10 +112,10 @@ async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     if task is None:
-        await update.message.reply_text("Не понял срок — уточните, когда напомнить.")
+        await update.message.reply_text("Не поняла срок — уточните, когда напомнить.")
         return
 
-    await update.message.reply_text(f"Записал: «{task.title}» — {describe_schedule(task)}.")
+    await update.message.reply_text(f"Записала: «{task.title}» — {describe_schedule(task)}.")
 
 
 async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -191,4 +191,4 @@ async def handle_cancel_task(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     cancel_task_reminder(task_id)
     await query.answer()
-    await query.edit_message_text("Отменил.")
+    await query.edit_message_text("Отменила.")

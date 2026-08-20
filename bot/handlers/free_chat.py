@@ -85,9 +85,9 @@ async def _process_text(
             return
 
         if task is None:
-            await update.message.reply_text("Не понял новое время — задача осталась без изменений.")
+            await update.message.reply_text("Не поняла новое время — задача осталась без изменений.")
         else:
-            await update.message.reply_text(f"Обновил: «{task.title}» — {describe_schedule(task)}.")
+            await update.message.reply_text(f"Обновила: «{task.title}» — {describe_schedule(task)}.")
         return
 
     try:
@@ -96,7 +96,7 @@ async def _process_text(
         if intent == Intent.task:
             task = await create_task_from_text(user_id, text)
             if task is not None:
-                await update.message.reply_text(f"Записал: «{task.title}» — {describe_schedule(task)}.")
+                await update.message.reply_text(f"Записала: «{task.title}» — {describe_schedule(task)}.")
                 return
             # Модель решила, что это задача, но не смогла распознать срок/повтор —
             # не показываем "не понял срок" на нейтральное сообщение, ведём как чат.

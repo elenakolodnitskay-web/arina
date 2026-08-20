@@ -73,7 +73,7 @@ async def handle_text_message(external_user_id: int, text: str) -> None:
             task = await create_task_from_text(user_id, text)
             if task is not None:
                 await send_message(
-                    external_user_id, f"Записал: «{task.title}» — {describe_schedule(task)}."
+                    external_user_id, f"Записала: «{task.title}» — {describe_schedule(task)}."
                 )
                 return
 

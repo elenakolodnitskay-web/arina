@@ -20,7 +20,7 @@ async def record_finance_message(user_id: int, text: str) -> str | None:
         if parsed.kind == "balance":
             user.balance = parsed.amount
             session.commit()
-            reply = f"Записал баланс: {parsed.amount:.0f} ₽."
+            reply = f"Записала баланс: {parsed.amount:.0f} ₽."
             if user.low_balance_threshold is not None and user.balance < user.low_balance_threshold:
                 reply += (
                     f"\n⚠️ Баланс ниже порога {user.low_balance_threshold:.0f} ₽ — "
@@ -48,4 +48,4 @@ async def record_finance_message(user_id: int, text: str) -> str | None:
 
         label = "расход" if transaction_type == TransactionType.expense else "поступление"
         category_part = f" ({parsed.category})" if parsed.category else ""
-        return f"Записал {label}: {parsed.amount:.0f} ₽{category_part}."
+        return f"Записала {label}: {parsed.amount:.0f} ₽{category_part}."
