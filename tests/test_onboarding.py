@@ -87,6 +87,26 @@ async def test_receive_profile_saves_encrypted_profile(db_session_factory, allow
         ).scalar_one()
         assert raw_value != "фрилансер, веду проекты по дизайну и личные дела семьи"
 
+    assert "/help" in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_help_command_sends_help_text_for_allowed_user(db_session_factory, allowed_user):
+    update = make_update(telegram_id=111)
+
+    await onboarding.help_command(update, context=None)
+
+    update.message.reply_text.assert_awaited_once_with(onboarding.HELP_TEXT)
+
+
+@pytest.mark.asyncio
+async def test_help_command_rejects_non_whitelisted_user(db_session_factory, allowed_user):
+    update = make_update(telegram_id=999)
+
+    await onboarding.help_command(update, context=None)
+
+    assert "закрыт" in update.message.reply_text.await_args.args[0]
+
 
 @pytest.mark.asyncio
 async def test_delete_my_data_removes_user_and_related_rows(db_session_factory, allowed_user):

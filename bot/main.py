@@ -19,7 +19,7 @@ from bot.handlers.documents_flow import (
     handle_reformulate_document,
 )
 from bot.handlers.free_chat import handle_context_correction, handle_message
-from bot.handlers.onboarding import cancel, delete_my_data, receive_profile, start
+from bot.handlers.onboarding import cancel, delete_my_data, help_command, receive_profile, start
 from bot.handlers.tasks_flow import create_task, handle_cancel_task, list_tasks
 from bot.states import OnboardingState
 from config import settings
@@ -69,6 +69,7 @@ def build_application() -> Application:
     )
 
     application.add_handler(onboarding_handler)
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("delete_my_data", delete_my_data))
     application.add_handler(CommandHandler("task", create_task))
     application.add_handler(CommandHandler("tasks", list_tasks))

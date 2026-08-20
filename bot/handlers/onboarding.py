@@ -6,6 +6,19 @@ from config import settings
 from db.models import DialogSummary, Note, Task, User
 from db.session import SessionLocal
 
+HELP_TEXT = (
+    "Вот что я умею:\n\n"
+    "— Пишите мне в свободной форме — я определяю, рабочее это или личное, и "
+    "запоминаю. Если ошиблась — под ответом кнопки «Рабочее»/«Личное», поправите.\n\n"
+    "— Ставьте задачи и напоминания обычным текстом («напомни мне...») — разово "
+    "или регулярно, пришлю сообщение в нужное время. Список активных задач — /tasks.\n\n"
+    "— /document <описание> — напишу черновик письма или документа, попрошу "
+    "подтвердить перед сохранением.\n\n"
+    "— Помню контекст разговора, не нужно повторно объяснять то, что уже "
+    "обсуждали.\n\n"
+    "— /delete_my_data — полностью удалю все ваши данные."
+)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     telegram_id = update.effective_user.id
@@ -44,7 +57,8 @@ async def receive_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         session.commit()
 
     await update.message.reply_text(
-        "Профиль сохранён. Теперь можно просто писать мне — как в обычном чате."
+        "Профиль сохранён. Теперь можно просто писать мне — как в обычном чате.\n\n"
+        "Если что — напишите /help, расскажу подробнее, что умею."
     )
     return ConversationHandler.END
 
@@ -52,6 +66,17 @@ async def receive_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Хорошо, вернёмся к этому позже. Напишите /start, когда будете готовы.")
     return ConversationHandler.END
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    telegram_id = update.effective_user.id
+    if telegram_id not in settings.allowed_user_ids_list:
+        await update.message.reply_text(
+            "Извините, доступ к Арине пока закрыт — это приватная бета по приглашениям."
+        )
+        return
+
+    await update.message.reply_text(HELP_TEXT)
 
 
 async def delete_my_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
