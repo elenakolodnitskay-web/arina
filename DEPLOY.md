@@ -20,6 +20,13 @@ cp .env.prod.example .env
 - `POSTGRES_PASSWORD` — сгенерировать случайный пароль
 - `DATABASE_URL` — тот же пароль, что в `POSTGRES_PASSWORD`, хост `postgres` (имя сервиса в docker-сети, не `localhost`)
 - `OPENROUTER_API_KEY` — с openrouter.ai
+- `OPENROUTER_BASE_URL` — **не** `https://openrouter.ai/api/v1` напрямую: с российских IP
+  (Beget в их числе) OpenRouter отвечает `403` на любой запрос — гео-блокировка на
+  уровне их WAF. Нужен релей: `https://arina-openrouter-relay.onrender.com/api/v1`
+  (уже задеплоен и проверен, репозиторий — [arina-openrouter-relay](https://github.com/elenakolodnitskay-web/arina-openrouter-relay),
+  на Render.com, не Cloudflare — Cloudflare Workers эту блокировку не обходят,
+  подробности в `Plan.md`, раздел «Блокер верхнего уровня»). Значение уже стоит по
+  умолчанию в `.env.prod.example`, менять не нужно, если не разворачиваете свой релей.
 - `FERNET_KEY` — сгенерировать **один раз**:
   ```bash
   python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
