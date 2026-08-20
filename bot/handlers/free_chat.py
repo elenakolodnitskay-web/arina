@@ -10,6 +10,7 @@ from llm.classify import classify_message
 from llm.client import LLMUnavailableError
 from llm.intent import Intent, detect_intent
 from llm.reply import generate_reply
+from llm.transcribe import transcribe_voice
 
 CONTEXT_LABELS = {Context.work: "рабочее", Context.personal: "личное"}
 
@@ -20,14 +21,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if telegram_id not in settings.allowed_user_ids_list:
         return
 
+    await _process_text(telegram_id, update.message.text, update, context)
+
+
+async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    telegram_id = update.effective_user.id
+
+    if telegram_id not in settings.allowed_user_ids_list:
+        return
+
+    voice_file = await context.bot.get_file(update.message.voice.file_id)
+    audio_bytes = bytes(await voice_file.download_as_bytearray())
+
+    try:
+        text = await transcribe_voice(audio_bytes)
+    except LLMUnavailableError as exc:
+        await update.message.reply_text(str(exc))
+        return
+
+    await _process_text(telegram_id, text, update, context)
+
+
+async def _process_text(
+    telegram_id: int, text: str, update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     with SessionLocal() as session:
         user = session.query(User).filter_by(telegram_id=telegram_id).one_or_none()
         if user is None or not user.onboarding_completed:
             await update.message.reply_text("Сначала пройдите короткий опрос — напишите /start.")
             return
         user_id = user.id
-
-    text = update.message.text
 
     pending_task_id = context.user_data.pop(EDIT_PENDING_KEY, None)
     if pending_task_id is not None:

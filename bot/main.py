@@ -18,7 +18,7 @@ from bot.handlers.documents_flow import (
     handle_confirm_document,
     handle_reformulate_document,
 )
-from bot.handlers.free_chat import handle_context_correction, handle_message
+from bot.handlers.free_chat import handle_context_correction, handle_message, handle_voice_message
 from bot.handlers.onboarding import cancel, delete_my_data, help_command, receive_profile, start
 from bot.handlers.tasks_flow import create_task, handle_cancel_task, handle_edit_task_button, list_tasks
 from bot.states import OnboardingState
@@ -84,6 +84,7 @@ def build_application() -> Application:
         CallbackQueryHandler(handle_reformulate_document, pattern=rf"^{REFORMULATE_CALLBACK}$")
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
     application.add_handler(CallbackQueryHandler(handle_context_correction, pattern=r"^set_context:"))
     application.add_error_handler(_on_error)
     return application

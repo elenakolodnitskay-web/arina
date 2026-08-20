@@ -250,6 +250,78 @@ async def test_handle_message_reports_unparseable_task_edit(db_session_factory, 
         assert session.query(Note).count() == 0
 
 
+def make_voice_update(telegram_id: int, file_id: str = "voice-file-id"):
+    update = MagicMock()
+    update.effective_user.id = telegram_id
+    update.message.voice.file_id = file_id
+    update.message.reply_text = AsyncMock()
+    return update
+
+
+@pytest.mark.asyncio
+async def test_handle_voice_message_transcribes_then_processes_as_text(
+    db_session_factory, allowed_user, no_real_reply, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(
+        free_chat,
+        "classify_message",
+        AsyncMock(return_value=ClassificationResult(context=Context.work, confidence=0.9)),
+    )
+    transcribe_mock = AsyncMock(return_value="отправить отчёт клиенту")
+    monkeypatch.setattr(free_chat, "transcribe_voice", transcribe_mock)
+
+    update = make_voice_update(telegram_id=111)
+    voice_file = MagicMock()
+    voice_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"raw ogg bytes"))
+    update.effective_chat = MagicMock()
+    context = make_context()
+    context.bot.get_file = AsyncMock(return_value=voice_file)
+
+    await free_chat.handle_voice_message(update, context)
+
+    context.bot.get_file.assert_awaited_once_with("voice-file-id")
+    transcribe_mock.assert_awaited_once_with(b"raw ogg bytes")
+    with db_session_factory() as session:
+        note = session.query(Note).one()
+        assert note.content == "отправить отчёт клиенту"
+
+    update.message.reply_text.assert_awaited_once()
+    assert update.message.reply_text.await_args.args[0] == "сгенерированный ответ"
+
+
+@pytest.mark.asyncio
+async def test_handle_voice_message_ignores_non_whitelisted_user(db_session_factory, allowed_user):
+    update = make_voice_update(telegram_id=999)
+    context = make_context()
+    context.bot.get_file = AsyncMock()
+
+    await free_chat.handle_voice_message(update, context)
+
+    context.bot.get_file.assert_not_awaited()
+    update.message.reply_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_voice_message_reports_transcription_error(db_session_factory, allowed_user, monkeypatch):
+    monkeypatch.setattr(
+        free_chat, "transcribe_voice", AsyncMock(side_effect=LLMUnavailableError("сеть недоступна"))
+    )
+
+    update = make_voice_update(telegram_id=111)
+    voice_file = MagicMock()
+    voice_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"raw ogg bytes"))
+    context = make_context()
+    context.bot.get_file = AsyncMock(return_value=voice_file)
+
+    await free_chat.handle_voice_message(update, context)
+
+    update.message.reply_text.assert_awaited_once_with("сеть недоступна")
+
+
 @pytest.mark.asyncio
 async def test_context_correction_sets_chosen_context_and_confirms(db_session_factory, allowed_user):
     with db_session_factory() as session:
