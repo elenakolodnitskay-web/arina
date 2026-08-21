@@ -92,6 +92,115 @@ async def test_send_reminder_sends_message_for_active_task(db_session_factory, m
 
 
 @pytest.mark.asyncio
+async def test_send_reminder_marks_one_off_task_done_after_sending(db_session_factory, monkeypatch):
+    with db_session_factory() as session:
+        user = User(telegram_id=555)
+        session.add(user)
+        session.flush()
+        task = Task(
+            user_id=user.id, title="разовая", context=Context.personal, status=TaskStatus.active,
+            recurrence_rule=None,
+        )
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    fake_bot = MagicMock()
+    fake_bot.__aenter__ = AsyncMock(return_value=fake_bot)
+    fake_bot.__aexit__ = AsyncMock(return_value=False)
+    fake_bot.send_message = AsyncMock()
+    monkeypatch.setattr(scheduler, "Bot", MagicMock(return_value=fake_bot))
+
+    await scheduler.send_reminder(task_id)
+
+    with db_session_factory() as session:
+        task = session.get(Task, task_id)
+        assert task.status == TaskStatus.done
+
+
+@pytest.mark.asyncio
+async def test_send_reminder_keeps_recurring_task_active_after_sending(db_session_factory, monkeypatch):
+    with db_session_factory() as session:
+        user = User(telegram_id=555)
+        session.add(user)
+        session.flush()
+        task = Task(
+            user_id=user.id, title="повторяющаяся", context=Context.personal, status=TaskStatus.active,
+            recurrence_rule="0 9 * * 1",
+        )
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    fake_bot = MagicMock()
+    fake_bot.__aenter__ = AsyncMock(return_value=fake_bot)
+    fake_bot.__aexit__ = AsyncMock(return_value=False)
+    fake_bot.send_message = AsyncMock()
+    monkeypatch.setattr(scheduler, "Bot", MagicMock(return_value=fake_bot))
+
+    await scheduler.send_reminder(task_id)
+
+    with db_session_factory() as session:
+        task = session.get(Task, task_id)
+        assert task.status == TaskStatus.active
+
+
+@pytest.mark.asyncio
+async def test_send_reminder_marks_done_for_max_platform_too(db_session_factory, monkeypatch):
+    with db_session_factory() as session:
+        user = User(telegram_id=777, platform="max")
+        session.add(user)
+        session.flush()
+        task = Task(
+            user_id=user.id, title="разовая на MAX", context=Context.personal, status=TaskStatus.active,
+            recurrence_rule=None,
+        )
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    import max_bot.client
+
+    max_send_mock = AsyncMock()
+    monkeypatch.setattr(max_bot.client, "send_message", max_send_mock)
+
+    await scheduler.send_reminder(task_id)
+
+    max_send_mock.assert_awaited_once_with(777, "Напоминание: разовая на MAX")
+    with db_session_factory() as session:
+        task = session.get(Task, task_id)
+        assert task.status == TaskStatus.done
+
+
+@pytest.mark.asyncio
+async def test_send_reminder_does_not_mark_done_if_sending_fails(db_session_factory, monkeypatch):
+    with db_session_factory() as session:
+        user = User(telegram_id=555)
+        session.add(user)
+        session.flush()
+        task = Task(
+            user_id=user.id, title="упавшая отправка", context=Context.personal, status=TaskStatus.active,
+            recurrence_rule=None,
+        )
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    fake_bot = MagicMock()
+    fake_bot.__aenter__ = AsyncMock(return_value=fake_bot)
+    fake_bot.__aexit__ = AsyncMock(return_value=False)
+    fake_bot.send_message = AsyncMock(side_effect=RuntimeError("boom"))
+    monkeypatch.setattr(scheduler, "Bot", MagicMock(return_value=fake_bot))
+
+    with pytest.raises(RuntimeError):
+        await scheduler.send_reminder(task_id)
+
+    with db_session_factory() as session:
+        task = session.get(Task, task_id)
+        assert task.status == TaskStatus.active
+
+
+@pytest.mark.asyncio
 async def test_send_reminder_skips_cancelled_task(db_session_factory, monkeypatch):
     with db_session_factory() as session:
         user = User(telegram_id=555)

@@ -431,3 +431,80 @@ async def test_handle_cancel_task_rejects_foreign_task(db_session_factory, allow
     with db_session_factory() as session:
         task = session.get(Task, task_id)
         assert task.status == TaskStatus.active
+
+
+@pytest.mark.asyncio
+async def test_handle_complete_task_marks_done(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        task = Task(user_id=user.id, title="задача", context=Context.work, status=TaskStatus.active)
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    update = MagicMock()
+    update.callback_query.from_user.id = 111
+    update.callback_query.data = f"complete_task:{task_id}"
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.edit_message_text = AsyncMock()
+
+    await tasks_flow.handle_complete_task(update, context=None)
+
+    with db_session_factory() as session:
+        task = session.get(Task, task_id)
+        assert task.status == TaskStatus.done
+
+    tasks_flow.cancel_task_reminder.assert_called_once_with(task_id)
+    update.callback_query.edit_message_text.assert_awaited_once_with("Отметила как выполненное.")
+
+
+@pytest.mark.asyncio
+async def test_handle_complete_task_rejects_foreign_task(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        owner = User(telegram_id=111, onboarding_completed=True)
+        session.add(owner)
+        session.flush()
+        task = Task(user_id=owner.id, title="чужая задача", context=Context.work, status=TaskStatus.active)
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    update = MagicMock()
+    update.callback_query.from_user.id = 222
+    update.callback_query.data = f"complete_task:{task_id}"
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.edit_message_text = AsyncMock()
+
+    await tasks_flow.handle_complete_task(update, context=None)
+
+    update.callback_query.edit_message_text.assert_not_called()
+    with db_session_factory() as session:
+        task = session.get(Task, task_id)
+        assert task.status == TaskStatus.active
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_shows_complete_button(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        session.add(
+            Task(
+                user_id=user.id,
+                title="активная задача",
+                context=Context.work,
+                status=TaskStatus.active,
+                recurrence_rule="0 9 * * 1",
+            )
+        )
+        session.commit()
+
+    update, context = make_command_update(111, [])
+    await tasks_flow.list_tasks(update, context)
+
+    keyboard = update.message.reply_text.await_args.kwargs["reply_markup"]
+    button_texts = [button.text for row in keyboard.inline_keyboard for button in row]
+    assert "Выполнено" in button_texts

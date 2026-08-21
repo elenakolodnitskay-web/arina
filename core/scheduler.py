@@ -62,13 +62,24 @@ async def send_reminder(task_id: int) -> None:
         title = task.title
         external_id = user.telegram_id
         platform = user.platform
+        is_one_off = not task.recurrence_rule
 
     if platform == "max":
         from max_bot.client import send_message as max_send_message
 
         await max_send_message(external_id, f"Напоминание: {title}")
-        return
+    else:
+        bot = Bot(token=settings.telegram_bot_token)
+        async with bot:
+            await bot.send_message(chat_id=external_id, text=f"Напоминание: {title}")
 
-    bot = Bot(token=settings.telegram_bot_token)
-    async with bot:
-        await bot.send_message(chat_id=external_id, text=f"Напоминание: {title}")
+    # Разовое напоминание после отправки больше не активно — становится done.
+    # Повторяющееся (recurrence_rule задан) остаётся active, оно живёт дальше по
+    # расписанию. Если отправка выше упала с исключением, до этой строки
+    # выполнение не дойдёт — статус не поменяется, останется active для повтора.
+    if is_one_off:
+        with SessionLocal() as session:
+            task = session.get(Task, task_id)
+            if task is not None:
+                task.status = TaskStatus.done
+                session.commit()

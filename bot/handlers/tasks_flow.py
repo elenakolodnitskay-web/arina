@@ -166,6 +166,7 @@ async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 [
                     [
                         InlineKeyboardButton("Изменить", callback_data=f"edit_task:{task.id}"),
+                        InlineKeyboardButton("Выполнено", callback_data=f"complete_task:{task.id}"),
                         InlineKeyboardButton("Отменить", callback_data=f"cancel_task:{task.id}"),
                     ]
                 ]
@@ -193,6 +194,27 @@ async def handle_edit_task_button(update: Update, context: ContextTypes.DEFAULT_
         f"Опишите новое время или текст для «{title}» — например: «завтра в 15:00» "
         "или сформулируйте задачу заново целиком."
     )
+
+
+async def handle_complete_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    telegram_id = query.from_user.id
+    task_id = int(query.data.split(":", 1)[1])
+
+    with SessionLocal() as session:
+        task = session.get(Task, task_id)
+        owner = session.get(User, task.user_id) if task is not None else None
+
+        if task is None or owner is None or owner.telegram_id != telegram_id:
+            await query.answer("Не получилось найти задачу.", show_alert=True)
+            return
+
+        task.status = TaskStatus.done
+        session.commit()
+
+    cancel_task_reminder(task_id)
+    await query.answer()
+    await query.edit_message_text("Отметила как выполненное.")
 
 
 async def handle_cancel_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
