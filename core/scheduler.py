@@ -6,7 +6,7 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import settings
 from db.models import Task, TaskStatus, User
@@ -69,19 +69,37 @@ async def send_reminder(task_id: int) -> None:
         from max_bot.client import send_message as max_send_message
 
         await max_send_message(external_id, f"Напоминание: {title}")
-    else:
-        bot = Bot(token=settings.telegram_bot_token)
-        async with bot:
-            await bot.send_message(chat_id=external_id, text=f"Напоминание: {title}")
+        # MAX не поддерживает инлайн-кнопки (известное упрощение MVP-среза, см.
+        # max_bot/handlers.py) — нет способа нажать «Выполнено»/«Отложить» под
+        # самим напоминанием, поэтому для MAX разовое напоминание по-прежнему
+        # сразу считается выполненным после отправки (старое поведение). Если
+        # отправка выше упала с исключением, до этой строки выполнение не
+        # дойдёт — статус не поменяется, останется active.
+        if is_one_off:
+            with SessionLocal() as session:
+                task = session.get(Task, task_id)
+                if task is not None:
+                    task.status = TaskStatus.done
+                    task.completed_at = datetime.now(timezone.utc)
+                    session.commit()
+        return
 
-    # Разовое напоминание после отправки больше не активно — становится done.
-    # Повторяющееся (recurrence_rule задан) остаётся active, оно живёт дальше по
-    # расписанию. Если отправка выше упала с исключением, до этой строки
-    # выполнение не дойдёт — статус не поменяется, останется active для повтора.
+    # В Telegram разовое напоминание ждёт явного действия пользователя — кнопки
+    # «Выполнено» (переиспользует тот же хендлер, что и в /tasks) и «Отложить»
+    # (задача остаётся active, просто подтверждается получение). Статус больше
+    # не меняется автоматически здесь — иначе кнопки были бы бессмысленны:
+    # задача успела бы стать done ещё до того, как пользователь успеет нажать.
+    keyboard = None
     if is_one_off:
-        with SessionLocal() as session:
-            task = session.get(Task, task_id)
-            if task is not None:
-                task.status = TaskStatus.done
-                task.completed_at = datetime.now(timezone.utc)
-                session.commit()
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("Выполнено", callback_data=f"complete_task:{task_id}"),
+                    InlineKeyboardButton("Отложить", callback_data=f"postpone_task:{task_id}"),
+                ]
+            ]
+        )
+
+    bot = Bot(token=settings.telegram_bot_token)
+    async with bot:
+        await bot.send_message(chat_id=external_id, text=f"Напоминание: {title}", reply_markup=keyboard)

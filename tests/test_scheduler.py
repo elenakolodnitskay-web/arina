@@ -88,11 +88,50 @@ async def test_send_reminder_sends_message_for_active_task(db_session_factory, m
 
     await scheduler.send_reminder(task_id)
 
-    fake_bot.send_message.assert_awaited_once_with(chat_id=555, text="Напоминание: позвонить маме")
+    fake_bot.send_message.assert_awaited_once()
+    call = fake_bot.send_message.await_args
+    assert call.kwargs["chat_id"] == 555
+    assert call.kwargs["text"] == "Напоминание: позвонить маме"
 
 
 @pytest.mark.asyncio
-async def test_send_reminder_marks_one_off_task_done_after_sending(db_session_factory, monkeypatch):
+async def test_send_reminder_attaches_complete_and_postpone_buttons_for_one_off(
+    db_session_factory, monkeypatch
+):
+    with db_session_factory() as session:
+        user = User(telegram_id=555)
+        session.add(user)
+        session.flush()
+        task = Task(
+            user_id=user.id, title="разовая", context=Context.personal, status=TaskStatus.active,
+            recurrence_rule=None,
+        )
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    fake_bot = MagicMock()
+    fake_bot.__aenter__ = AsyncMock(return_value=fake_bot)
+    fake_bot.__aexit__ = AsyncMock(return_value=False)
+    fake_bot.send_message = AsyncMock()
+    monkeypatch.setattr(scheduler, "Bot", MagicMock(return_value=fake_bot))
+
+    await scheduler.send_reminder(task_id)
+
+    keyboard = fake_bot.send_message.await_args.kwargs["reply_markup"]
+    buttons = [button for row in keyboard.inline_keyboard for button in row]
+    callback_data = {button.callback_data for button in buttons}
+    assert callback_data == {f"complete_task:{task_id}", f"postpone_task:{task_id}"}
+
+
+@pytest.mark.asyncio
+async def test_send_reminder_keeps_one_off_task_active_in_telegram_until_button_pressed(
+    db_session_factory, monkeypatch
+):
+    # После Фазы 25 (кнопки «Выполнено»/«Отложить») разовое напоминание в
+    # Telegram больше не переходит в done автоматически при отправке — иначе
+    # кнопки были бы бессмысленны (задача уже done ещё до того, как пользователь
+    # успеет нажать). Done проставляет только handle_complete_task.
     with db_session_factory() as session:
         user = User(telegram_id=555)
         session.add(user)
@@ -115,8 +154,8 @@ async def test_send_reminder_marks_one_off_task_done_after_sending(db_session_fa
 
     with db_session_factory() as session:
         task = session.get(Task, task_id)
-        assert task.status == TaskStatus.done
-        assert task.completed_at is not None
+        assert task.status == TaskStatus.active
+        assert task.completed_at is None
 
 
 @pytest.mark.asyncio
@@ -144,6 +183,9 @@ async def test_send_reminder_keeps_recurring_task_active_after_sending(db_sessio
     with db_session_factory() as session:
         task = session.get(Task, task_id)
         assert task.status == TaskStatus.active
+    # Повторяющейся задаче некуда деваться после этого напоминания — она и так
+    # активна, «Выполнено»/«Отложить» тут не нужны, кнопок быть не должно.
+    assert fake_bot.send_message.await_args.kwargs["reply_markup"] is None
 
 
 @pytest.mark.asyncio

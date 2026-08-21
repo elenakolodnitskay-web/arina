@@ -487,6 +487,56 @@ async def test_handle_complete_task_rejects_foreign_task(db_session_factory, all
 
 
 @pytest.mark.asyncio
+async def test_handle_postpone_task_keeps_active(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        task = Task(user_id=user.id, title="разовая задача", context=Context.work, status=TaskStatus.active)
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    update = MagicMock()
+    update.callback_query.from_user.id = 111
+    update.callback_query.data = f"postpone_task:{task_id}"
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.edit_message_text = AsyncMock()
+
+    await tasks_flow.handle_postpone_task(update, context=None)
+
+    with db_session_factory() as session:
+        task = session.get(Task, task_id)
+        assert task.status == TaskStatus.active
+
+    update.callback_query.answer.assert_awaited_once()
+    assert "разовая задача" in update.callback_query.edit_message_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_postpone_task_rejects_foreign_task(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        owner = User(telegram_id=111, onboarding_completed=True)
+        session.add(owner)
+        session.flush()
+        task = Task(user_id=owner.id, title="чужая задача", context=Context.work, status=TaskStatus.active)
+        session.add(task)
+        session.commit()
+        task_id = task.id
+
+    update = MagicMock()
+    update.callback_query.from_user.id = 222
+    update.callback_query.data = f"postpone_task:{task_id}"
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.edit_message_text = AsyncMock()
+
+    await tasks_flow.handle_postpone_task(update, context=None)
+
+    update.callback_query.edit_message_text.assert_not_called()
+    update.callback_query.answer.assert_awaited_once_with("Не получилось найти задачу.", show_alert=True)
+
+
+@pytest.mark.asyncio
 async def test_list_tasks_shows_complete_button(db_session_factory, allowed_user):
     with db_session_factory() as session:
         user = User(telegram_id=111, onboarding_completed=True)
