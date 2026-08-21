@@ -150,17 +150,48 @@ async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     with SessionLocal() as session:
         user = session.query(User).filter_by(telegram_id=telegram_id).one_or_none()
+        tasks = (
+            session.query(Task)
+            .filter_by(user_id=user.id, status=TaskStatus.active)
+            .order_by(Task.created_at)
+            .all()
+            if user is not None
+            else []
+        )
 
+        if not tasks:
+            await update.message.reply_text("Активных задач нет.")
+            return
+
+        for task in tasks:
+            when = _format_local(task.due_at) if task.due_at else task.recurrence_rule
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("Изменить", callback_data=f"edit_task:{task.id}"),
+                        InlineKeyboardButton("Выполнено", callback_data=f"complete_task:{task.id}"),
+                        InlineKeyboardButton("Отменить", callback_data=f"cancel_task:{task.id}"),
+                    ]
+                ]
+            )
+            await update.message.reply_text(f"{task.title} — {when}", reply_markup=keyboard)
+
+
+async def list_completed_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/tasks_done — отдельная команда для просмотра недавно выполненных задач,
+
+    вынесена из /tasks по просьбе пользователя: активные и выполненные — разные
+    списки, не одно сообщение вперемешку.
+    """
+    telegram_id = update.effective_user.id
+    if telegram_id not in settings.allowed_user_ids_list:
+        return
+
+    with SessionLocal() as session:
+        user = session.query(User).filter_by(telegram_id=telegram_id).one_or_none()
         if user is None:
-            tasks = []
             recent_done = []
         else:
-            tasks = (
-                session.query(Task)
-                .filter_by(user_id=user.id, status=TaskStatus.active)
-                .order_by(Task.created_at)
-                .all()
-            )
             cutoff = datetime.now(timezone.utc) - timedelta(days=RECENT_DONE_DAYS)
             recent_done = (
                 session.query(Task)
@@ -170,27 +201,12 @@ async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 .all()
             )
 
-        if not tasks:
-            await update.message.reply_text("Активных задач нет.")
-        else:
-            for task in tasks:
-                when = _format_local(task.due_at) if task.due_at else task.recurrence_rule
-                keyboard = InlineKeyboardMarkup(
-                    [
-                        [
-                            InlineKeyboardButton("Изменить", callback_data=f"edit_task:{task.id}"),
-                            InlineKeyboardButton("Выполнено", callback_data=f"complete_task:{task.id}"),
-                            InlineKeyboardButton("Отменить", callback_data=f"cancel_task:{task.id}"),
-                        ]
-                    ]
-                )
-                await update.message.reply_text(f"{task.title} — {when}", reply_markup=keyboard)
+    if not recent_done:
+        await update.message.reply_text(f"Выполненных задач за последние {RECENT_DONE_DAYS} дней нет.")
+        return
 
-        if recent_done:
-            lines = [f"✅ {task.title} — {_format_local(task.completed_at)}" for task in recent_done]
-            await update.message.reply_text(
-                f"Выполнено за последние {RECENT_DONE_DAYS} дней:\n" + "\n".join(lines)
-            )
+    lines = [f"✅ {task.title} — {_format_local(task.completed_at)}" for task in recent_done]
+    await update.message.reply_text(f"Выполнено за последние {RECENT_DONE_DAYS} дней:\n" + "\n".join(lines))
 
 
 async def handle_edit_task_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

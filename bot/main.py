@@ -42,6 +42,7 @@ from bot.handlers.tasks_flow import (
     handle_cancel_task,
     handle_complete_task,
     handle_edit_task_button,
+    list_completed_tasks,
     list_tasks,
 )
 from bot.states import OnboardingState
@@ -67,6 +68,7 @@ BOT_COMMANDS = [
     BotCommand("help", "Что умеет Арина"),
     BotCommand("task", "Поставить задачу или напоминание"),
     BotCommand("tasks", "Показать активные задачи"),
+    BotCommand("tasks_done", "Показать выполненные задачи"),
     BotCommand("document", "Сгенерировать письмо или документ"),
     BotCommand("delete_my_data", "Удалить все мои данные"),
 ]
@@ -109,6 +111,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("delete_my_data", delete_my_data))
     application.add_handler(CommandHandler("task", create_task))
     application.add_handler(CommandHandler("tasks", list_tasks))
+    application.add_handler(CommandHandler("tasks_done", list_completed_tasks))
     application.add_handler(CallbackQueryHandler(handle_cancel_task, pattern=r"^cancel_task:"))
     application.add_handler(CallbackQueryHandler(handle_complete_task, pattern=r"^complete_task:"))
     application.add_handler(CallbackQueryHandler(handle_edit_task_button, pattern=r"^edit_task:"))

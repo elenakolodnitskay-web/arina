@@ -512,7 +512,32 @@ async def test_list_tasks_shows_complete_button(db_session_factory, allowed_user
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_shows_recently_completed_section(db_session_factory, allowed_user):
+async def test_list_tasks_does_not_show_completed_tasks(db_session_factory, allowed_user):
+    # /tasks — только активные; выполненные теперь отдельно, в /tasks_done
+    # (Фаза 25, дополнение по просьбе пользователя).
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        session.add(
+            Task(
+                user_id=user.id,
+                title="выполненная недавно",
+                context=Context.work,
+                status=TaskStatus.done,
+                completed_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+        )
+        session.commit()
+
+    update, context = make_command_update(111, [])
+    await tasks_flow.list_tasks(update, context)
+
+    update.message.reply_text.assert_awaited_once_with("Активных задач нет.")
+
+
+@pytest.mark.asyncio
+async def test_list_completed_tasks_shows_recently_completed(db_session_factory, allowed_user):
     with db_session_factory() as session:
         user = User(telegram_id=111, onboarding_completed=True)
         session.add(user)
@@ -530,17 +555,15 @@ async def test_list_tasks_shows_recently_completed_section(db_session_factory, a
         session.commit()
 
     update, context = make_command_update(111, [])
-    await tasks_flow.list_tasks(update, context)
+    await tasks_flow.list_completed_tasks(update, context)
 
-    # Активных задач нет — первое сообщение про это, второе про выполненные.
-    calls = update.message.reply_text.await_args_list
-    assert "Активных задач нет." in calls[0].args[0]
-    assert "выполненная недавно" in calls[1].args[0]
-    assert "Выполнено за последние 7 дней" in calls[1].args[0]
+    reply = update.message.reply_text.await_args.args[0]
+    assert "выполненная недавно" in reply
+    assert "Выполнено за последние 7 дней" in reply
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_omits_old_completed_tasks(db_session_factory, allowed_user):
+async def test_list_completed_tasks_omits_old_completed_tasks(db_session_factory, allowed_user):
     with db_session_factory() as session:
         user = User(telegram_id=111, onboarding_completed=True)
         session.add(user)
@@ -557,13 +580,15 @@ async def test_list_tasks_omits_old_completed_tasks(db_session_factory, allowed_
         session.commit()
 
     update, context = make_command_update(111, [])
-    await tasks_flow.list_tasks(update, context)
+    await tasks_flow.list_completed_tasks(update, context)
 
-    update.message.reply_text.assert_awaited_once_with("Активных задач нет.")
+    reply = update.message.reply_text.await_args.args[0]
+    assert "выполненная давно" not in reply
+    assert "нет" in reply
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_omits_completed_tasks_without_completed_at(db_session_factory, allowed_user):
+async def test_list_completed_tasks_omits_tasks_without_completed_at(db_session_factory, allowed_user):
     # Задачи, ставшие done ещё до появления поля completed_at (Фаза 25) — NULL,
     # не попадают в список "недавно выполненных" за отсутствием даты.
     with db_session_factory() as session:
@@ -582,6 +607,17 @@ async def test_list_tasks_omits_completed_tasks_without_completed_at(db_session_
         session.commit()
 
     update, context = make_command_update(111, [])
-    await tasks_flow.list_tasks(update, context)
+    await tasks_flow.list_completed_tasks(update, context)
 
-    update.message.reply_text.assert_awaited_once_with("Активных задач нет.")
+    reply = update.message.reply_text.await_args.args[0]
+    assert "выполненная до Фазы 25" not in reply
+    assert "нет" in reply
+
+
+@pytest.mark.asyncio
+async def test_list_completed_tasks_ignores_non_whitelisted_user(db_session_factory, allowed_user):
+    update, context = make_command_update(999, [])
+
+    await tasks_flow.list_completed_tasks(update, context)
+
+    update.message.reply_text.assert_not_called()
