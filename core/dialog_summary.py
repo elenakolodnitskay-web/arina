@@ -41,3 +41,23 @@ def get_recent_context(user_id: int, context: Context) -> str | None:
         total_chars += len(note.content)
 
     return "\n".join(reversed(selected))
+
+
+def get_recent_note_ids(user_id: int, context: Context) -> set[int]:
+    """ID заметок, уже попавших (или могущих попасть) в окно get_recent_context —
+    используется семантическим поиском (Фаза 27, core/semantic_memory.py), чтобы не
+    подмешивать в промпт то же самое сообщение дважды: один раз как "недавнее",
+    второй раз как "похожее по смыслу". Тот же запрос/лимит, что и в
+    get_recent_context, намеренно продублирован — так проще и безопаснее, чем
+    ужимать обе функции в одну ради устранения дублирования кода ценой более
+    хрупкого API.
+    """
+    with SessionLocal() as session:
+        rows = (
+            session.query(Note.id)
+            .filter_by(user_id=user_id, context=context)
+            .order_by(Note.created_at.desc(), Note.id.desc())
+            .limit(MAX_RECENT_MESSAGES)
+            .all()
+        )
+    return {note_id for (note_id,) in rows}

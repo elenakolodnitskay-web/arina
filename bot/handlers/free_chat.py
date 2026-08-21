@@ -16,11 +16,13 @@ from bot.handlers.tasks_flow import (
 )
 from bot.handlers.voice_reply import send_reply
 from config import settings
-from core.dialog_summary import get_recent_context
+from core.dialog_summary import get_recent_context, get_recent_note_ids
+from core.semantic_memory import find_relevant_notes
 from db.models import Context, Note, User
 from db.session import SessionLocal
 from llm.classify import classify_message
 from llm.client import LLMUnavailableError
+from llm.embeddings import get_embedding_or_none
 from llm.intent import Intent, detect_intent
 from llm.reply import generate_reply
 from llm.transcribe import transcribe_voice
@@ -120,7 +122,9 @@ async def _process_text(
         # внутри create_task_from_text), либо для обычного чата ниже — она нужна
         # почти всегда, кроме finance/document/relay/email, где расчёт впустую
         # компенсируется тем, что шёл параллельно, не добавляя задержки.
-        intent, classification = await asyncio.gather(detect_intent(text), classify_message(text))
+        intent, classification, query_embedding = await asyncio.gather(
+            detect_intent(text), classify_message(text), get_embedding_or_none(text)
+        )
 
         if intent == Intent.task:
             task = await create_task_from_text(user_id, text, classification)
@@ -162,7 +166,13 @@ async def _process_text(
 
         result = classification
         recent_context = get_recent_context(user_id, result.context)
-        reply_text = await generate_reply(text, result.context, recent_context, profile_summary)
+        relevant_notes = None
+        if query_embedding is not None:
+            recent_ids = get_recent_note_ids(user_id, result.context)
+            relevant_notes = find_relevant_notes(user_id, result.context, query_embedding, recent_ids)
+        reply_text = await generate_reply(
+            text, result.context, recent_context, profile_summary, relevant_notes
+        )
     except LLMUnavailableError as exc:
         await send_reply(update, str(exc), reply_mode)
         return
@@ -171,7 +181,7 @@ async def _process_text(
         return
 
     with SessionLocal() as session:
-        note = Note(user_id=user_id, content=text, context=result.context)
+        note = Note(user_id=user_id, content=text, context=result.context, embedding=query_embedding)
         session.add(note)
         session.commit()
         note_id = note.id

@@ -95,3 +95,44 @@ def test_get_recent_context_always_keeps_most_recent_message_whole(
     # режется посередине, а входит целиком (защита от одного длинного сообщения
     # не должна ломать единственное доступное сообщение).
     assert result == "это сообщение длиннее лимита"
+
+
+def test_get_recent_note_ids_returns_empty_set_without_notes(db_session_factory, user_id):
+    assert dialog_summary.get_recent_note_ids(user_id, Context.work) == set()
+
+
+def test_get_recent_note_ids_returns_ids_of_recent_notes(db_session_factory, user_id):
+    with db_session_factory() as session:
+        note1 = Note(user_id=user_id, content="первое", context=Context.work)
+        note2 = Note(user_id=user_id, content="второе", context=Context.work)
+        session.add_all([note1, note2])
+        session.commit()
+        ids = {note1.id, note2.id}
+
+    assert dialog_summary.get_recent_note_ids(user_id, Context.work) == ids
+
+
+def test_get_recent_note_ids_respects_max_recent_messages(db_session_factory, user_id, monkeypatch):
+    monkeypatch.setattr(dialog_summary, "MAX_RECENT_MESSAGES", 2)
+    with db_session_factory() as session:
+        ids = []
+        for i in range(4):
+            note = Note(user_id=user_id, content=f"сообщение {i}", context=Context.work)
+            session.add(note)
+            session.commit()
+            ids.append(note.id)
+
+    result = dialog_summary.get_recent_note_ids(user_id, Context.work)
+
+    assert result == set(ids[-2:])
+
+
+def test_get_recent_note_ids_keeps_contexts_separate(db_session_factory, user_id):
+    with db_session_factory() as session:
+        work_note = Note(user_id=user_id, content="рабочее", context=Context.work)
+        personal_note = Note(user_id=user_id, content="личное", context=Context.personal)
+        session.add_all([work_note, personal_note])
+        session.commit()
+        work_id = work_note.id
+
+    assert dialog_summary.get_recent_note_ids(user_id, Context.work) == {work_id}

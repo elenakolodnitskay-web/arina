@@ -5,6 +5,7 @@ aiohttp
 SQLAlchemy>=2,<3
 alembic
 psycopg2-binary
+pgvector
 cryptography
 APScheduler
 pydantic-settings

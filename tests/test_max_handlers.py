@@ -40,6 +40,23 @@ def no_real_recent_context(monkeypatch):
     monkeypatch.setattr(handlers, "get_recent_context", MagicMock(return_value=None))
 
 
+@pytest.fixture(autouse=True)
+def no_real_embedding(monkeypatch):
+    # get_embedding_or_none тоже теперь в общем asyncio.gather (Фаза 27) — без
+    # дефолтного мока тесты делали бы настоящий сетевой запрос к эмбеддингам.
+    mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(handlers, "get_embedding_or_none", mock)
+    return mock
+
+
+@pytest.fixture(autouse=True)
+def no_real_semantic_search(monkeypatch):
+    monkeypatch.setattr(handlers, "get_recent_note_ids", MagicMock(return_value=set()))
+    mock = MagicMock(return_value=None)
+    monkeypatch.setattr(handlers, "find_relevant_notes", mock)
+    return mock
+
+
 @pytest.mark.asyncio
 async def test_new_user_gets_onboarding_prompt(db_session_factory, allowed_user, no_real_send):
     await handlers.handle_text_message(555, "привет")
@@ -147,6 +164,39 @@ async def test_chat_intent_saves_note_and_replies(db_session_factory, allowed_us
     with db_session_factory() as session:
         note = session.query(Note).filter_by(user_id=user_id).one()
         assert note.content == "отправить отчёт клиенту"
+
+
+@pytest.mark.asyncio
+async def test_chat_intent_saves_embedding_and_uses_semantic_search(
+    db_session_factory, allowed_user, no_real_send, no_real_embedding, no_real_semantic_search, monkeypatch
+):
+    with db_session_factory() as session:
+        user = User(telegram_id=555, platform="max", onboarding_completed=True)
+        session.add(user)
+        session.commit()
+        user_id = user.id
+
+    fake_vector = [0.1, 0.2, 0.3]
+    no_real_embedding.return_value = fake_vector
+    monkeypatch.setattr(handlers, "get_recent_note_ids", MagicMock(return_value={7}))
+    no_real_semantic_search.return_value = "давно упоминал похожий факт"
+    monkeypatch.setattr(handlers, "detect_intent", AsyncMock(return_value=Intent.chat))
+    monkeypatch.setattr(
+        handlers, "classify_message", AsyncMock(return_value=ClassificationResult(Context.work, 0.9))
+    )
+    reply_mock = AsyncMock(return_value="Записал.")
+    monkeypatch.setattr(handlers, "generate_reply", reply_mock)
+
+    await handlers.handle_text_message(555, "напомни, что там было")
+
+    with db_session_factory() as session:
+        note = session.query(Note).filter_by(user_id=user_id).one()
+        assert list(note.embedding) == fake_vector
+
+    no_real_semantic_search.assert_called_once_with(user_id, Context.work, fake_vector, {7})
+    reply_mock.assert_awaited_once_with(
+        "напомни, что там было", Context.work, None, None, "давно упоминал похожий факт"
+    )
 
 
 @pytest.mark.asyncio

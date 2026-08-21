@@ -1,12 +1,19 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Numeric, String, UniqueConstraint
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from db.crypto import EncryptedString
+
+# Размерность эмбеддинга openai/text-embedding-3-small (см. llm/embeddings.py) —
+# фиксированная константа, а не настройка: смена модели эмбеддингов потребует
+# новой миграции (менять размер существующей колонки vector нельзя без пересчёта
+# всех эмбеддингов заново).
+EMBEDDING_DIM = 1536
 
 
 class Base(DeclarativeBase):
@@ -93,12 +100,29 @@ class Task(Base):
 
 class Note(Base):
     __tablename__ = "notes"
+    __table_args__ = (
+        Index(
+            "ix_notes_embedding_cosine",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     content: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     context: Mapped[Context] = mapped_column(SAEnum(Context, native_enum=False, length=16), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Фаза 27 — семантическая память. В отличие от content, НЕ зашифровано Fernet:
+    # поиск по смыслу (ближайшие по косинусному расстоянию) должен считаться прямо
+    # в Postgres через pgvector, а Fernet-шифрование недетерминировано и уничтожило
+    # бы саму структуру вектора, по которой считается расстояние — encrypted-at-rest
+    # для векторов тут технически невозможно при сохранении векторного поиска.
+    # NULL — либо запись создана до этой миграции (не бэкфиллено), либо вычисление
+    # эмбеддинга не удалось (сетевая ошибка) — в обоих случаях запись просто не
+    # участвует в семантическом поиске, но не теряется и остаётся в окне Фазы 19.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
 
 
 class Transaction(Base):

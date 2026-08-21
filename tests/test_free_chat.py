@@ -62,6 +62,23 @@ def default_classification(monkeypatch):
     return mock
 
 
+@pytest.fixture(autouse=True)
+def no_real_embedding(monkeypatch):
+    # get_embedding_or_none тоже теперь в общем asyncio.gather (Фаза 27) — без
+    # дефолтного мока тесты делали бы настоящий сетевой запрос к эмбеддингам.
+    mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(free_chat, "get_embedding_or_none", mock)
+    return mock
+
+
+@pytest.fixture(autouse=True)
+def no_real_semantic_search(monkeypatch):
+    monkeypatch.setattr(free_chat, "get_recent_note_ids", MagicMock(return_value=set()))
+    mock = MagicMock(return_value=None)
+    monkeypatch.setattr(free_chat, "find_relevant_notes", mock)
+    return mock
+
+
 def make_message_update(telegram_id: int, text: str):
     update = MagicMock()
     update.effective_user.id = telegram_id
@@ -122,11 +139,50 @@ async def test_handle_message_saves_classified_note(
         assert note.context == Context.work
 
     no_real_recent_context.assert_called_once_with(user_id, Context.work)
-    no_real_reply.assert_awaited_once_with("отправить отчёт клиенту", Context.work, None, None)
+    no_real_reply.assert_awaited_once_with("отправить отчёт клиенту", Context.work, None, None, None)
 
     update.message.reply_text.assert_awaited_once()
     assert update.message.reply_text.await_args.args[0] == "сгенерированный ответ"
     assert update.message.reply_text.await_args.kwargs["reply_markup"] is not None
+
+
+@pytest.mark.asyncio
+async def test_handle_message_saves_embedding_and_uses_semantic_search(
+    db_session_factory,
+    allowed_user,
+    no_real_recent_context,
+    no_real_reply,
+    no_real_embedding,
+    no_real_semantic_search,
+    monkeypatch,
+):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.commit()
+        user_id = user.id
+
+    fake_vector = [0.1, 0.2, 0.3]
+    no_real_embedding.return_value = fake_vector
+    monkeypatch.setattr(free_chat, "get_recent_note_ids", MagicMock(return_value={42}))
+    no_real_semantic_search.return_value = "давно упоминал похожий факт"
+    monkeypatch.setattr(
+        free_chat,
+        "classify_message",
+        AsyncMock(return_value=ClassificationResult(context=Context.work, confidence=0.9)),
+    )
+
+    update = make_message_update(telegram_id=111, text="напомни, что там было")
+    await free_chat.handle_message(update, make_context())
+
+    with db_session_factory() as session:
+        note = session.query(Note).one()
+        assert list(note.embedding) == fake_vector
+
+    no_real_semantic_search.assert_called_once_with(user_id, Context.work, fake_vector, {42})
+    no_real_reply.assert_awaited_once_with(
+        "напомни, что там было", Context.work, None, None, "давно упоминал похожий факт"
+    )
 
 
 @pytest.mark.asyncio
@@ -148,7 +204,7 @@ async def test_handle_message_passes_recent_context_into_reply(
     await free_chat.handle_message(update, make_context())
 
     no_real_reply.assert_awaited_once_with(
-        "что там с поездкой", Context.personal, "вчера обсуждали поездку в отпуск", None
+        "что там с поездкой", Context.personal, "вчера обсуждали поездку в отпуск", None, None
     )
 
 
@@ -176,7 +232,7 @@ async def test_handle_message_passes_profile_summary_into_reply(
     await free_chat.handle_message(update, make_context())
 
     no_real_reply.assert_awaited_once_with(
-        "что по проектам", Context.work, None, "фрилансер, дизайн и seo-проекты"
+        "что по проектам", Context.work, None, "фрилансер, дизайн и seo-проекты", None
     )
 
 

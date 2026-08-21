@@ -68,3 +68,31 @@ async def test_generate_reply_enables_web_search(monkeypatch):
     await reply.generate_reply("какая погода в Симферополе", Context.personal, None)
 
     assert fake_complete.await_args.kwargs["web_search"] is True
+
+
+@pytest.mark.asyncio
+async def test_generate_reply_includes_relevant_notes_when_present(monkeypatch):
+    fake_complete = AsyncMock(return_value="Да, помню — ты говорил про это.")
+    monkeypatch.setattr(reply, "complete", fake_complete)
+
+    await reply.generate_reply(
+        "напомни, что там было с арендой",
+        Context.personal,
+        None,
+        relevant_notes="месяц назад: договор аренды продлили до конца года",
+    )
+
+    system_prompt = fake_complete.await_args.args[0][0]["content"]
+    assert "договор аренды продлили до конца года" in system_prompt
+    assert "не в недавней истории" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_generate_reply_omits_relevant_notes_block_when_absent(monkeypatch):
+    fake_complete = AsyncMock(return_value="Хорошо.")
+    monkeypatch.setattr(reply, "complete", fake_complete)
+
+    await reply.generate_reply("привет", Context.personal, None)
+
+    system_prompt = fake_complete.await_args.args[0][0]["content"]
+    assert "не в недавней истории" not in system_prompt

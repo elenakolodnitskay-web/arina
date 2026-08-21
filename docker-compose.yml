@@ -1,6 +1,9 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16 — тот же Postgres 16, что и раньше (postgres:16-alpine),
+    # плюс расширение vector для семантической памяти (Фаза 27). Смена образа не
+    # ломает существующие данные — тот же мажорный формат, том сохраняется.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: arina
       POSTGRES_PASSWORD: arina

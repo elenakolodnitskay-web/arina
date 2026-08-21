@@ -3,11 +3,13 @@ import asyncio
 from bot.handlers.onboarding import HELP_TEXT
 from bot.handlers.tasks_flow import create_task_from_text, describe_schedule, describe_tasks_for_chat
 from config import settings
-from core.dialog_summary import get_recent_context
+from core.dialog_summary import get_recent_context, get_recent_note_ids
+from core.semantic_memory import find_relevant_notes
 from db.models import EmailLog, Note, Task, Transaction, User
 from db.session import SessionLocal
 from llm.classify import classify_message
 from llm.client import LLMUnavailableError
+from llm.embeddings import get_embedding_or_none
 from llm.intent import Intent, detect_intent
 from llm.reply import generate_reply
 from max_bot.client import send_message
@@ -85,7 +87,9 @@ async def handle_text_message(external_user_id: int, text: str) -> None:
         # detect_intent и classify_message независимы друг от друга — запускаем
         # параллельно вместо последовательных обращений к модели (тот же приём,
         # что в bot/handlers/free_chat.py).
-        intent, result = await asyncio.gather(detect_intent(text), classify_message(text))
+        intent, result, query_embedding = await asyncio.gather(
+            detect_intent(text), classify_message(text), get_embedding_or_none(text)
+        )
 
         if intent == Intent.task:
             task = await create_task_from_text(user_id, text, result)
@@ -100,7 +104,13 @@ async def handle_text_message(external_user_id: int, text: str) -> None:
             return
 
         recent_context = get_recent_context(user_id, result.context)
-        reply_text = await generate_reply(text, result.context, recent_context, profile_summary)
+        relevant_notes = None
+        if query_embedding is not None:
+            recent_ids = get_recent_note_ids(user_id, result.context)
+            relevant_notes = find_relevant_notes(user_id, result.context, query_embedding, recent_ids)
+        reply_text = await generate_reply(
+            text, result.context, recent_context, profile_summary, relevant_notes
+        )
     except LLMUnavailableError as exc:
         await send_message(external_user_id, str(exc))
         return
@@ -109,7 +119,7 @@ async def handle_text_message(external_user_id: int, text: str) -> None:
         return
 
     with SessionLocal() as session:
-        session.add(Note(user_id=user_id, content=text, context=result.context))
+        session.add(Note(user_id=user_id, content=text, context=result.context, embedding=query_embedding))
         session.commit()
 
     await send_message(external_user_id, reply_text)

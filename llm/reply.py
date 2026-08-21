@@ -14,6 +14,7 @@ SYSTEM_PROMPT_TEMPLATE = """Ты — Арина, личный ИИ-ассист�
 не влияет на грамматический род остального текста.
 {profile_block}
 {recent_messages_block}
+{relevant_notes_block}
 Ты умеешь ставить задачи и напоминания (разовые и повторяющиеся) по свободной \
 формулировке — пользователю не нужна отдельная команда, достаточно попросить \
 обычным текстом ("напомни...", "не забыть..."), и ты сама пришлёшь сообщение в \
@@ -37,7 +38,11 @@ SYSTEM_PROMPT_TEMPLATE = """Ты — Арина, личный ИИ-ассист�
 
 
 async def generate_reply(
-    text: str, context: Context, recent_messages: str | None, profile_summary: str | None = None
+    text: str,
+    context: Context,
+    recent_messages: str | None,
+    profile_summary: str | None = None,
+    relevant_notes: str | None = None,
 ) -> str:
     profile_block = f"\nО пользователе (из профиля): {profile_summary}" if profile_summary else ""
     recent_messages_block = (
@@ -46,10 +51,21 @@ async def generate_reply(
         if recent_messages
         else ""
     )
+    # Фаза 27 — семантическая память: записи ЗА пределами недавнего окна выше,
+    # найденные по смысловой похожести на текущее сообщение (core/semantic_memory.py).
+    # Явно помечены "не из недавней истории", чтобы модель не путала их со свежим
+    # контекстом разговора — это старые факты, которые могут быть неактуальны.
+    relevant_notes_block = (
+        f"\nРанее (не в недавней истории, может быть неактуально) пользователь "
+        f"упоминал похожее по смыслу:\n{relevant_notes}"
+        if relevant_notes
+        else ""
+    )
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
         context_label=CONTEXT_LABELS[context],
         profile_block=profile_block,
         recent_messages_block=recent_messages_block,
+        relevant_notes_block=relevant_notes_block,
     )
     messages = [
         {"role": "system", "content": system_prompt},
