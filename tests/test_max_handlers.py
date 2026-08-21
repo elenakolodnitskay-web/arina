@@ -105,6 +105,29 @@ async def test_task_intent_routes_to_task_creation(db_session_factory, allowed_u
 
 
 @pytest.mark.asyncio
+async def test_tasks_view_intent_routes_to_task_listing(
+    db_session_factory, allowed_user, no_real_send, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=555, platform="max", onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(handlers, "detect_intent", AsyncMock(return_value=Intent.tasks_view))
+    monkeypatch.setattr(
+        handlers, "classify_message", AsyncMock(return_value=ClassificationResult(Context.work, 0.9))
+    )
+    describe_mock = AsyncMock(return_value="Активных задач нет.")
+    monkeypatch.setattr(handlers, "describe_tasks_for_chat", describe_mock)
+
+    await handlers.handle_text_message(555, "что у меня по задачам")
+
+    describe_mock.assert_awaited_once()
+    no_real_send.assert_awaited_once_with(555, "Активных задач нет.")
+    with db_session_factory() as session:
+        assert session.query(Note).count() == 0
+
+
+@pytest.mark.asyncio
 async def test_chat_intent_saves_note_and_replies(db_session_factory, allowed_user, no_real_send, monkeypatch):
     with db_session_factory() as session:
         user = User(telegram_id=555, platform="max", onboarding_completed=True)

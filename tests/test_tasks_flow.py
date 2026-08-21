@@ -671,3 +671,74 @@ async def test_list_completed_tasks_ignores_non_whitelisted_user(db_session_fact
     await tasks_flow.list_completed_tasks(update, context)
 
     update.message.reply_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_describe_tasks_for_chat_reports_no_tasks(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.commit()
+        user_id = user.id
+
+    reply = await tasks_flow.describe_tasks_for_chat(user_id)
+
+    assert reply == "Активных задач нет."
+
+
+@pytest.mark.asyncio
+async def test_describe_tasks_for_chat_shows_active_and_recently_completed(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        session.add(
+            Task(
+                user_id=user.id,
+                title="позвонить маме",
+                context=Context.personal,
+                status=TaskStatus.active,
+                due_at=datetime(2026, 8, 22, 10, 0, tzinfo=timezone.utc),
+            )
+        )
+        session.add(
+            Task(
+                user_id=user.id,
+                title="купить форму",
+                context=Context.personal,
+                status=TaskStatus.done,
+                completed_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            )
+        )
+        session.commit()
+        user_id = user.id
+
+    reply = await tasks_flow.describe_tasks_for_chat(user_id)
+
+    assert "Активные задачи:" in reply
+    assert "позвонить маме" in reply
+    assert "Выполнено за последние 7 дней:" in reply
+    assert "купить форму" in reply
+
+
+@pytest.mark.asyncio
+async def test_describe_tasks_for_chat_omits_old_completed(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        session.add(
+            Task(
+                user_id=user.id,
+                title="давняя задача",
+                context=Context.personal,
+                status=TaskStatus.done,
+                completed_at=datetime.now(timezone.utc) - timedelta(days=30),
+            )
+        )
+        session.commit()
+        user_id = user.id
+
+    reply = await tasks_flow.describe_tasks_for_chat(user_id)
+
+    assert reply == "Активных задач нет."

@@ -1,7 +1,7 @@
 import asyncio
 
 from bot.handlers.onboarding import HELP_TEXT
-from bot.handlers.tasks_flow import create_task_from_text, describe_schedule
+from bot.handlers.tasks_flow import create_task_from_text, describe_schedule, describe_tasks_for_chat
 from config import settings
 from core.dialog_summary import get_recent_context
 from db.models import EmailLog, Note, Task, Transaction, User
@@ -20,11 +20,14 @@ PLATFORM = "max"
 # /tasks (редактирование/отмена), /document, пересылки по @username (Фаза 17) и
 # email-напоминаний (Фаза 18). Учёт бюджета (Фаза 14) тоже не подключён. detect_intent
 # всё равно может вернуть finance/document/relay/email на MAX-сообщении — ниже
-# обрабатывается только Intent.task, остальные намерения тихо уходят в обычный чат
-# (тот же graceful fallback, что и у task при нераспознанном сроке). Пока MAX не
-# запущен (MAX_BOT_TOKEN не задан), это не имеет живого эффекта. Основной путь на
-# MAX сейчас: онбординг + свободный чат с автоклассификацией + постановка
-# задач/напоминаний естественным языком. См. Plan.md.
+# обрабатываются только Intent.task и Intent.tasks_view (оба не требуют кнопок —
+# tasks_view вообще read-only), остальные намерения тихо уходят в обычный чат (тот
+# же graceful fallback, что и у task при нераспознанном сроке). У MAX нет команды
+# /tasks вовсе — tasks_view здесь особенно ценен: единственный способ посмотреть
+# список задач. Пока MAX не запущен (MAX_BOT_TOKEN не задан), это не имеет живого
+# эффекта. Основной путь на MAX сейчас: онбординг + свободный чат с
+# автоклассификацией + постановка/просмотр задач/напоминаний естественным языком.
+# См. Plan.md.
 
 
 async def handle_text_message(external_user_id: int, text: str) -> None:
@@ -87,6 +90,10 @@ async def handle_text_message(external_user_id: int, text: str) -> None:
                     external_user_id, f"Записала: «{task.title}» — {describe_schedule(task)}."
                 )
                 return
+
+        if intent == Intent.tasks_view:
+            await send_message(external_user_id, await describe_tasks_for_chat(user_id))
+            return
 
         recent_context = get_recent_context(user_id, result.context)
         reply_text = await generate_reply(text, result.context, recent_context, profile_summary)

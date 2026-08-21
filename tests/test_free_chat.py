@@ -216,6 +216,28 @@ async def test_handle_message_routes_task_intent_to_task_creation(
 
 
 @pytest.mark.asyncio
+async def test_handle_message_routes_tasks_view_intent_to_task_listing(
+    db_session_factory, allowed_user, chat_intent_by_default, no_real_reply, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    chat_intent_by_default.return_value = Intent.tasks_view
+    describe_mock = AsyncMock(return_value="Активные задачи:\n• позвонить маме — 21.08.2026 18:00")
+    monkeypatch.setattr(free_chat, "describe_tasks_for_chat", describe_mock)
+
+    update = make_message_update(telegram_id=111, text="покажи мои задачи на сегодня")
+    await free_chat.handle_message(update, make_context())
+
+    describe_mock.assert_awaited_once()
+    assert "позвонить маме" in update.message.reply_text.await_args.args[0]
+    no_real_reply.assert_not_called()
+    with db_session_factory() as session:
+        assert session.query(Note).count() == 0
+
+
+@pytest.mark.asyncio
 async def test_handle_message_routes_finance_intent_to_finance_flow(
     db_session_factory, allowed_user, chat_intent_by_default, no_real_reply, monkeypatch
 ):

@@ -15,6 +15,15 @@ async def test_detect_intent_task(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_detect_intent_tasks_view(monkeypatch):
+    monkeypatch.setattr(intent, "complete", AsyncMock(return_value='{"intent": "tasks_view"}'))
+
+    result = await intent.detect_intent("покажи мои задачи на сегодня")
+
+    assert result == intent.Intent.tasks_view
+
+
+@pytest.mark.asyncio
 async def test_detect_intent_chat(monkeypatch):
     monkeypatch.setattr(intent, "complete", AsyncMock(return_value='{"intent": "chat"}'))
 

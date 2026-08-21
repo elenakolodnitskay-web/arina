@@ -28,6 +28,47 @@ def describe_schedule(task: Task) -> str:
     return f"напомню {_format_local(task.due_at)}"
 
 
+async def describe_tasks_for_chat(user_id: int) -> str:
+    """Текстовое описание активных и недавно выполненных задач — для ответа в
+    свободном чате/голосом на вопросы вроде «покажи мои задачи» или «что я уже
+    сделала» (намерение `Intent.tasks_view`, bot/handlers/free_chat.py). В
+    отличие от /tasks и /tasks_done, которые выводят разными сообщениями (с
+    кнопками у активных) — здесь один компактный текстовый ответ без кнопок,
+    подходящий для обычной реплики в разговоре.
+    """
+    with SessionLocal() as session:
+        active_tasks = (
+            session.query(Task)
+            .filter_by(user_id=user_id, status=TaskStatus.active)
+            .order_by(Task.created_at)
+            .all()
+        )
+        cutoff = datetime.now(timezone.utc) - timedelta(days=RECENT_DONE_DAYS)
+        recent_done = (
+            session.query(Task)
+            .filter_by(user_id=user_id, status=TaskStatus.done)
+            .filter(Task.completed_at >= cutoff)
+            .order_by(Task.completed_at.desc())
+            .all()
+        )
+
+    parts = []
+    if active_tasks:
+        lines = [
+            f"• {task.title} — {_format_local(task.due_at) if task.due_at else task.recurrence_rule}"
+            for task in active_tasks
+        ]
+        parts.append("Активные задачи:\n" + "\n".join(lines))
+    else:
+        parts.append("Активных задач нет.")
+
+    if recent_done:
+        lines = [f"✅ {task.title} — {_format_local(task.completed_at)}" for task in recent_done]
+        parts.append(f"Выполнено за последние {RECENT_DONE_DAYS} дней:\n" + "\n".join(lines))
+
+    return "\n\n".join(parts)
+
+
 async def create_task_from_text(
     user_id: int, text: str, classification: ClassificationResult | None = None
 ) -> Task | None:

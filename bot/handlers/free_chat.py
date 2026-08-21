@@ -7,7 +7,13 @@ from bot.handlers.documents_flow import start_document_draft
 from bot.handlers.email_flow import start_email_draft
 from bot.handlers.finance_flow import record_finance_message
 from bot.handlers.relay_flow import start_relay_draft
-from bot.handlers.tasks_flow import EDIT_PENDING_KEY, apply_task_edit, create_task_from_text, describe_schedule
+from bot.handlers.tasks_flow import (
+    EDIT_PENDING_KEY,
+    apply_task_edit,
+    create_task_from_text,
+    describe_schedule,
+    describe_tasks_for_chat,
+)
 from config import settings
 from core.dialog_summary import get_recent_context
 from db.models import Context, Note, User
@@ -121,6 +127,10 @@ async def _process_text(
                 return
             # Модель решила, что это задача, но не смогла распознать срок/повтор —
             # не показываем "не понял срок" на нейтральное сообщение, ведём как чат.
+
+        elif intent == Intent.tasks_view:
+            await update.message.reply_text(await describe_tasks_for_chat(user_id))
+            return
 
         elif intent == Intent.finance:
             finance_reply = await record_finance_message(user_id, text)
