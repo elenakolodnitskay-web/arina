@@ -17,6 +17,7 @@ from bot.handlers.tasks_flow import (
 from bot.handlers.voice_reply import send_reply
 from config import settings
 from core.dialog_summary import get_recent_context, get_recent_note_ids
+from core.pdf_extract import extract_text_from_pdf
 from core.semantic_memory import find_relevant_notes
 from core.tariffs import Feature, feature_unavailable_message, has_feature
 from db.models import Context, Note, User
@@ -27,6 +28,7 @@ from llm.embeddings import get_embedding_or_none
 from llm.intent import Intent, detect_intent
 from llm.reply import generate_reply
 from llm.transcribe import transcribe_voice
+from llm.vision import extract_text_from_image
 
 CONTEXT_LABELS = {Context.work: "рабочее", Context.personal: "личное"}
 
@@ -61,10 +63,83 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     await _process_text(telegram_id, text, update, context)
 
 
+# Не сетевая/LLM-защита от патологически большого распознанного текста (фото
+# плотного текста, многостраничный PDF) — тот же приём, что у core/pdf_extract.py
+# для самого PDF: не даём одному вложению раздуть стоимость/размер промпта
+# следующих шагов (detect_intent/classify_message/generate_reply и т.д.).
+MAX_EXTRACTED_TEXT_CHARS = 6000
+
+
+async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    telegram_id = update.effective_user.id
+
+    if telegram_id not in settings.allowed_user_ids_list:
+        return
+
+    # photo — список размеров одного и того же снимка от меньшего к большему,
+    # берём последний (наибольшее разрешение) для максимально точного распознавания.
+    photo = update.message.photo[-1]
+    photo_file = await context.bot.get_file(photo.file_id)
+    image_bytes = bytes(await photo_file.download_as_bytearray())
+
+    try:
+        extracted = await extract_text_from_image(image_bytes)
+    except LLMUnavailableError as exc:
+        await update.message.reply_text(str(exc))
+        return
+
+    if not extracted.strip():
+        await update.message.reply_text(
+            "Не нашла текста на этом фото — если текст там всё же есть, попробуйте "
+            "прислать более чёткое/крупное изображение."
+        )
+        return
+
+    await _process_extracted_text(telegram_id, extracted[:MAX_EXTRACTED_TEXT_CHARS], update, context)
+
+
+async def handle_pdf_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    telegram_id = update.effective_user.id
+
+    if telegram_id not in settings.allowed_user_ids_list:
+        return
+
+    pdf_file = await context.bot.get_file(update.message.document.file_id)
+    pdf_bytes = bytes(await pdf_file.download_as_bytearray())
+    extracted = extract_text_from_pdf(pdf_bytes)
+
+    if not extracted.strip():
+        await update.message.reply_text(
+            "Не нашла текста в этом PDF — похоже, это скан без текстового слоя. "
+            "Попробуйте прислать как фото (страницу целиком)."
+        )
+        return
+
+    await _process_extracted_text(telegram_id, extracted, update, context)
+
+
+async def _process_extracted_text(
+    telegram_id: int, extracted_text: str, update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Распознанный с фото/PDF текст (Фаза 30) заходит в тот же _process_text, что
+    обычный текст/голос — так автоматически срабатывает нужное намерение (переслать
+    через relay, оформить в документ, отправить на email) на основе подписи к
+    вложению. Подпись (если есть) ставится ПЕРЕД распознанным текстом, чтобы
+    detect_intent/парсеры relay-email видели инструкцию пользователя раньше самого
+    содержимого — так же, как естественно строилась бы обычная текстовая просьба
+    "передай @ivan: <текст>".
+    """
+    caption = (update.message.caption or "").strip()
+    combined_text = f"{caption}\n\n{extracted_text}" if caption else extracted_text
+    await _process_text(telegram_id, combined_text, update, context)
+
+
 async def handle_unsupported_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Ловит форматы сообщений без отдельного хендлера (видеосообщение-кружок,
-    стикеры, фото и т.п.) — чтобы пользователь получал понятный ответ вместо
-    полного молчания бота, если формат не распознан ни одним из фильтров выше.
+    стикеры, файлы кроме PDF и т.п. — фото и PDF с Фазы 30 обрабатываются отдельно
+    через handle_photo_message/handle_pdf_message) — чтобы пользователь получал
+    понятный ответ вместо полного молчания бота, если формат не распознан ни одним
+    из фильтров выше.
     """
     telegram_id = update.effective_user.id
 

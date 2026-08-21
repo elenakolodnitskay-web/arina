@@ -708,6 +708,184 @@ async def test_handle_voice_message_also_accepts_audio_file(
     transcribe_mock.assert_awaited_once_with(b"raw mp3 bytes")
 
 
+def make_photo_update(telegram_id: int, caption: str | None = None):
+    update = MagicMock()
+    update.effective_user.id = telegram_id
+    small = MagicMock(file_id="photo-small-id")
+    large = MagicMock(file_id="photo-large-id")
+    update.message.photo = [small, large]
+    update.message.caption = caption
+    update.message.reply_text = AsyncMock()
+    return update
+
+
+def make_pdf_update(telegram_id: int, caption: str | None = None):
+    update = MagicMock()
+    update.effective_user.id = telegram_id
+    update.message.document = MagicMock(file_id="pdf-file-id")
+    update.message.caption = caption
+    update.message.reply_text = AsyncMock()
+    return update
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_message_extracts_text_and_processes_it(
+    db_session_factory, allowed_user, no_real_reply, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(
+        free_chat,
+        "classify_message",
+        AsyncMock(return_value=ClassificationResult(context=Context.work, confidence=0.9)),
+    )
+    extract_mock = AsyncMock(return_value="Привет, Ваня! Заберите документы до пятницы.")
+    monkeypatch.setattr(free_chat, "extract_text_from_image", extract_mock)
+
+    update = make_photo_update(telegram_id=111)
+    photo_file = MagicMock()
+    photo_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"raw png bytes"))
+    context = make_context()
+    context.bot.get_file = AsyncMock(return_value=photo_file)
+
+    await free_chat.handle_photo_message(update, context)
+
+    # Берём последний (наибольшего разрешения) элемент списка photo.
+    context.bot.get_file.assert_awaited_once_with("photo-large-id")
+    extract_mock.assert_awaited_once_with(b"raw png bytes")
+    with db_session_factory() as session:
+        note = session.query(Note).one()
+        assert note.content == "Привет, Ваня! Заберите документы до пятницы."
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_message_prepends_caption_before_extracted_text(
+    db_session_factory, allowed_user, no_real_reply, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(
+        free_chat,
+        "classify_message",
+        AsyncMock(return_value=ClassificationResult(context=Context.work, confidence=0.9)),
+    )
+    monkeypatch.setattr(free_chat, "extract_text_from_image", AsyncMock(return_value="текст с фото"))
+
+    update = make_photo_update(telegram_id=111, caption="перепечатай и покажи мне")
+    photo_file = MagicMock()
+    photo_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"raw png bytes"))
+    context = make_context()
+    context.bot.get_file = AsyncMock(return_value=photo_file)
+
+    await free_chat.handle_photo_message(update, context)
+
+    with db_session_factory() as session:
+        note = session.query(Note).one()
+        assert note.content == "перепечатай и покажи мне\n\nтекст с фото"
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_message_reports_no_text_found(db_session_factory, allowed_user, monkeypatch):
+    monkeypatch.setattr(free_chat, "extract_text_from_image", AsyncMock(return_value=""))
+
+    update = make_photo_update(telegram_id=111)
+    photo_file = MagicMock()
+    photo_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"raw png bytes"))
+    context = make_context()
+    context.bot.get_file = AsyncMock(return_value=photo_file)
+
+    await free_chat.handle_photo_message(update, context)
+
+    assert "не нашла текста" in update.message.reply_text.await_args.args[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_message_reports_llm_unavailable(db_session_factory, allowed_user, monkeypatch):
+    monkeypatch.setattr(
+        free_chat, "extract_text_from_image", AsyncMock(side_effect=LLMUnavailableError("сеть недоступна"))
+    )
+
+    update = make_photo_update(telegram_id=111)
+    photo_file = MagicMock()
+    photo_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"raw png bytes"))
+    context = make_context()
+    context.bot.get_file = AsyncMock(return_value=photo_file)
+
+    await free_chat.handle_photo_message(update, context)
+
+    update.message.reply_text.assert_awaited_once_with("сеть недоступна")
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_message_ignores_non_whitelisted_user(db_session_factory, allowed_user):
+    update = make_photo_update(telegram_id=999)
+    context = make_context()
+    context.bot.get_file = AsyncMock()
+
+    await free_chat.handle_photo_message(update, context)
+
+    context.bot.get_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handle_pdf_message_extracts_text_and_processes_it(
+    db_session_factory, allowed_user, no_real_reply, monkeypatch
+):
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True))
+        session.commit()
+
+    monkeypatch.setattr(
+        free_chat,
+        "classify_message",
+        AsyncMock(return_value=ClassificationResult(context=Context.work, confidence=0.9)),
+    )
+    monkeypatch.setattr(free_chat, "extract_text_from_pdf", MagicMock(return_value="текст из PDF"))
+
+    update = make_pdf_update(telegram_id=111)
+    pdf_file = MagicMock()
+    pdf_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"raw pdf bytes"))
+    context = make_context()
+    context.bot.get_file = AsyncMock(return_value=pdf_file)
+
+    await free_chat.handle_pdf_message(update, context)
+
+    context.bot.get_file.assert_awaited_once_with("pdf-file-id")
+    with db_session_factory() as session:
+        note = session.query(Note).one()
+        assert note.content == "текст из PDF"
+
+
+@pytest.mark.asyncio
+async def test_handle_pdf_message_reports_scanned_pdf_without_text(db_session_factory, allowed_user, monkeypatch):
+    monkeypatch.setattr(free_chat, "extract_text_from_pdf", MagicMock(return_value=""))
+
+    update = make_pdf_update(telegram_id=111)
+    pdf_file = MagicMock()
+    pdf_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"raw pdf bytes"))
+    context = make_context()
+    context.bot.get_file = AsyncMock(return_value=pdf_file)
+
+    await free_chat.handle_pdf_message(update, context)
+
+    assert "скан" in update.message.reply_text.await_args.args[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_handle_pdf_message_ignores_non_whitelisted_user(db_session_factory, allowed_user):
+    update = make_pdf_update(telegram_id=999)
+    context = make_context()
+    context.bot.get_file = AsyncMock()
+
+    await free_chat.handle_pdf_message(update, context)
+
+    context.bot.get_file.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_handle_unsupported_message_replies_with_hint(db_session_factory, allowed_user):
     update = MagicMock()

@@ -21,6 +21,8 @@ from bot.handlers.documents_flow import (
 from bot.handlers.free_chat import (
     handle_context_correction,
     handle_message,
+    handle_pdf_message,
+    handle_photo_message,
     handle_unsupported_message,
     handle_voice_message,
 )
@@ -144,9 +146,11 @@ def build_application() -> Application:
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
+    application.add_handler(MessageHandler(filters.Document.PDF, handle_pdf_message))
     application.add_handler(CallbackQueryHandler(handle_context_correction, pattern=r"^set_context:"))
-    # Ловит любые другие форматы (видео-кружок, стикер, фото...) — иначе бот молчит,
-    # не давая понять, что сообщение вообще дошло, но не распознано.
+    # Ловит любые другие форматы (видео-кружок, стикер, файлы кроме PDF...) — иначе
+    # бот молчит, не давая понять, что сообщение вообще дошло, но не распознано.
     application.add_handler(MessageHandler(filters.ALL, handle_unsupported_message))
     application.add_error_handler(_on_error)
     return application
