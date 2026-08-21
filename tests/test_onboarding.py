@@ -8,7 +8,8 @@ from telegram.ext import ConversationHandler
 from bot.handlers import onboarding
 from bot.states import OnboardingState
 from config import settings
-from db.models import Base, User
+from db.models import Base, Tariff, User
+from llm.client import LLMUnavailableError
 
 
 @pytest.fixture()
@@ -24,6 +25,14 @@ def db_session_factory(monkeypatch):
 @pytest.fixture()
 def allowed_user(monkeypatch):
     monkeypatch.setattr(settings, "allowed_user_ids", "111")
+
+
+@pytest.fixture(autouse=True)
+def no_real_greeting(monkeypatch):
+    # Иначе test_receive_profile_* делали бы настоящий сетевой запрос.
+    mock = AsyncMock(return_value=("Персональное приветствие.", Tariff.secretary))
+    monkeypatch.setattr(onboarding, "generate_onboarding_greeting", mock)
+    return mock
 
 
 def make_update(telegram_id: int, text: str | None = None, username: str | None = None):
@@ -105,6 +114,54 @@ async def test_receive_profile_saves_encrypted_profile(db_session_factory, allow
         ).scalar_one()
         assert raw_value != "фрилансер, веду проекты по дизайну и личные дела семьи"
 
+
+@pytest.mark.asyncio
+async def test_receive_profile_sends_personalized_greeting_and_sets_tariff(
+    db_session_factory, allowed_user, no_real_greeting
+):
+    no_real_greeting.return_value = ("Рада познакомиться, вот что я умею.", Tariff.accountant)
+    update = make_update(telegram_id=111, text="веду учёт трат и доходов по проектам", username="ivan_petrov")
+
+    await onboarding.receive_profile(update, context=None)
+
+    with db_session_factory() as session:
+        user = session.query(User).filter_by(telegram_id=111).one()
+        assert user.tariff == Tariff.accountant
+
+    reply = update.message.reply_text.await_args.args[0]
+    assert "Рада познакомиться, вот что я умею." in reply
+    assert "Бухгалтер" in reply
+    assert "/tariff" in reply
+
+
+@pytest.mark.asyncio
+async def test_receive_profile_falls_back_to_static_text_when_llm_unavailable(
+    db_session_factory, allowed_user, no_real_greeting
+):
+    no_real_greeting.side_effect = LLMUnavailableError("сеть недоступна")
+    update = make_update(telegram_id=111, text="что-то про себя", username="ivan_petrov")
+
+    result = await onboarding.receive_profile(update, context=None)
+
+    assert result == ConversationHandler.END
+    with db_session_factory() as session:
+        user = session.query(User).filter_by(telegram_id=111).one()
+        # Профиль сохранён несмотря на сбой генерации приветствия, тариф не тронут
+        # (остаётся server_default, полный доступ по умолчанию).
+        assert user.onboarding_completed is True
+    assert "/help" in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_receive_profile_falls_back_to_static_text_on_malformed_response(
+    db_session_factory, allowed_user, no_real_greeting
+):
+    no_real_greeting.side_effect = ValueError("bad json")
+    update = make_update(telegram_id=111, text="что-то про себя", username="ivan_petrov")
+
+    result = await onboarding.receive_profile(update, context=None)
+
+    assert result == ConversationHandler.END
     assert "/help" in update.message.reply_text.await_args.args[0]
 
 

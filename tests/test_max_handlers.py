@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from db.models import Base, Context, EmailLog, Note, Task, Transaction, User
+from db.models import Base, Context, EmailLog, Note, Task, Tariff, Transaction, User
 from llm.classify import ClassificationResult
 from llm.client import LLMUnavailableError
 from llm.intent import Intent
@@ -57,6 +57,14 @@ def no_real_semantic_search(monkeypatch):
     return mock
 
 
+@pytest.fixture(autouse=True)
+def no_real_greeting(monkeypatch):
+    # Иначе онбординг делал бы настоящий сетевой запрос к generate_onboarding_greeting.
+    mock = AsyncMock(return_value=("Персональное приветствие.", Tariff.secretary))
+    monkeypatch.setattr(handlers, "generate_onboarding_greeting", mock)
+    return mock
+
+
 @pytest.mark.asyncio
 async def test_new_user_gets_onboarding_prompt(db_session_factory, allowed_user, no_real_send):
     await handlers.handle_text_message(555, "привет")
@@ -76,7 +84,10 @@ async def test_non_whitelisted_user_gets_rejected(db_session_factory):
 
 
 @pytest.mark.asyncio
-async def test_second_message_completes_onboarding(db_session_factory, allowed_user, no_real_send):
+async def test_second_message_completes_onboarding(
+    db_session_factory, allowed_user, no_real_send, no_real_greeting
+):
+    no_real_greeting.return_value = ("Рада знакомству!", Tariff.accountant)
     with db_session_factory() as session:
         session.add(User(telegram_id=555, platform="max"))
         session.commit()
@@ -87,6 +98,23 @@ async def test_second_message_completes_onboarding(db_session_factory, allowed_u
         user = session.query(User).filter_by(telegram_id=555, platform="max").one()
         assert user.onboarding_completed is True
         assert user.profile_summary == "фрилансер, дизайн и семья"
+        assert user.tariff == Tariff.accountant
+    sent_text = no_real_send.await_args.args[1]
+    assert "Рада знакомству!" in sent_text
+    assert "Бухгалтер" in sent_text
+
+
+@pytest.mark.asyncio
+async def test_onboarding_falls_back_when_greeting_unavailable(
+    db_session_factory, allowed_user, no_real_send, no_real_greeting
+):
+    no_real_greeting.side_effect = LLMUnavailableError("сеть недоступна")
+    with db_session_factory() as session:
+        session.add(User(telegram_id=555, platform="max"))
+        session.commit()
+
+    await handlers.handle_text_message(555, "фрилансер, дизайн и семья")
+
     assert "/help" in no_real_send.await_args.args[1]
 
 

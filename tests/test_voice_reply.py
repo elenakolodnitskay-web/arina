@@ -94,6 +94,40 @@ async def test_handle_voice_mode_choice_sets_text(db_session_factory, allowed_us
 
 
 @pytest.mark.asyncio
+async def test_handle_voice_mode_choice_blocked_on_secretary_tariff(db_session_factory, allowed_user):
+    from db.models import Tariff
+
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True, tariff=Tariff.secretary))
+        session.commit()
+
+    update = make_callback_update(111, voice_reply.VOICE_CALLBACK)
+    await voice_reply.handle_voice_mode_choice(update, context=None)
+
+    with db_session_factory() as session:
+        user = session.query(User).filter_by(telegram_id=111).one()
+        assert user.reply_mode == ReplyMode.text  # не изменился
+
+    assert "/tariff" in update.callback_query.edit_message_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_voice_mode_choice_switching_to_text_never_blocked(db_session_factory, allowed_user):
+    from db.models import Tariff
+
+    with db_session_factory() as session:
+        session.add(
+            User(telegram_id=111, onboarding_completed=True, tariff=Tariff.secretary, reply_mode=ReplyMode.text)
+        )
+        session.commit()
+
+    update = make_callback_update(111, voice_reply.TEXT_CALLBACK)
+    await voice_reply.handle_voice_mode_choice(update, context=None)
+
+    assert "текстом" in update.callback_query.edit_message_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_handle_voice_mode_choice_rejects_unknown_user(db_session_factory, allowed_user):
     update = make_callback_update(999, voice_reply.VOICE_CALLBACK)
 

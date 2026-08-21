@@ -31,6 +31,7 @@ from bot.handlers.email_flow import (
     handle_reformulate_email,
 )
 from bot.handlers.onboarding import cancel, delete_my_data, help_command, receive_profile, start
+from bot.handlers.tariff_flow import handle_tariff_choice, tariff_command
 from bot.handlers.relay_flow import (
     CONFIRM_CALLBACK as RELAY_CONFIRM_CALLBACK,
     REFORMULATE_CALLBACK as RELAY_REFORMULATE_CALLBACK,
@@ -72,6 +73,7 @@ BOT_COMMANDS = [
     BotCommand("tasks", "Показать активные задачи"),
     BotCommand("tasks_done", "Показать выполненные задачи"),
     BotCommand("voice_mode", "Отвечать голосом или текстом"),
+    BotCommand("tariff", "Посмотреть или сменить тариф"),
     BotCommand("document", "Сгенерировать письмо или документ"),
     BotCommand("delete_my_data", "Удалить все мои данные"),
 ]
@@ -117,6 +119,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("tasks_done", list_completed_tasks))
     application.add_handler(CommandHandler("voice_mode", voice_mode_command))
     application.add_handler(CallbackQueryHandler(handle_voice_mode_choice, pattern=r"^voice_mode:"))
+    application.add_handler(CommandHandler("tariff", tariff_command))
+    application.add_handler(CallbackQueryHandler(handle_tariff_choice, pattern=r"^tariff:"))
     application.add_handler(CallbackQueryHandler(handle_cancel_task, pattern=r"^cancel_task:"))
     application.add_handler(CallbackQueryHandler(handle_complete_task, pattern=r"^complete_task:"))
     application.add_handler(CallbackQueryHandler(handle_postpone_task, pattern=r"^postpone_task:"))

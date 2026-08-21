@@ -18,7 +18,7 @@ async def test_on_startup_sets_russian_commands(monkeypatch):
     application.bot.set_my_commands.assert_awaited_once_with(main.BOT_COMMANDS)
     commands_by_name = {c.command: c.description for c in main.BOT_COMMANDS}
     assert set(commands_by_name) == {
-        "start", "help", "task", "tasks", "tasks_done", "voice_mode", "document", "delete_my_data",
+        "start", "help", "task", "tasks", "tasks_done", "voice_mode", "tariff", "document", "delete_my_data",
     }
     assert all(description for description in commands_by_name.values())
 

@@ -393,6 +393,45 @@ async def test_handle_message_routes_email_intent_to_email_draft(
         assert session.query(Note).count() == 0
 
 
+@pytest.mark.parametrize(
+    "intent, attr_name, message_text",
+    [
+        (Intent.finance, "record_finance_message", "потратила 500 в Пятёрочке"),
+        (Intent.document, "start_document_draft", "напиши письмо клиенту"),
+        (Intent.relay, "start_relay_draft", "передай @ivan_petrov, что встреча переносится"),
+        (Intent.email, "start_email_draft", "напиши на ivan@example.com про оплату"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_handle_message_blocks_gated_intents_on_secretary_tariff(
+    db_session_factory,
+    allowed_user,
+    chat_intent_by_default,
+    no_real_reply,
+    monkeypatch,
+    intent,
+    attr_name,
+    message_text,
+):
+    from db.models import Tariff
+
+    with db_session_factory() as session:
+        session.add(User(telegram_id=111, onboarding_completed=True, tariff=Tariff.secretary))
+        session.commit()
+
+    chat_intent_by_default.return_value = intent
+    gated_mock = AsyncMock()
+    monkeypatch.setattr(free_chat, attr_name, gated_mock)
+
+    update = make_message_update(telegram_id=111, text=message_text)
+    await free_chat.handle_message(update, make_context())
+
+    gated_mock.assert_not_called()
+    no_real_reply.assert_not_called()
+    update.message.reply_text.assert_awaited_once()
+    assert "/tariff" in update.message.reply_text.await_args.args[0]
+
+
 @pytest.mark.asyncio
 async def test_handle_message_falls_back_to_chat_when_finance_unparseable(
     db_session_factory, allowed_user, chat_intent_by_default, no_real_reply, monkeypatch

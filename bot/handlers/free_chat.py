@@ -18,6 +18,7 @@ from bot.handlers.voice_reply import send_reply
 from config import settings
 from core.dialog_summary import get_recent_context, get_recent_note_ids
 from core.semantic_memory import find_relevant_notes
+from core.tariffs import Feature, feature_unavailable_message, has_feature
 from db.models import Context, Note, User
 from db.session import SessionLocal
 from llm.classify import classify_message
@@ -87,6 +88,7 @@ async def _process_text(
         user_id = user.id
         profile_summary = user.profile_summary
         reply_mode = user.reply_mode
+        tariff = user.tariff
 
     pending_task_id = context.user_data.pop(EDIT_PENDING_KEY, None)
     if pending_task_id is not None:
@@ -139,6 +141,9 @@ async def _process_text(
             return
 
         elif intent == Intent.finance:
+            if not has_feature(tariff, Feature.finance):
+                await send_reply(update, feature_unavailable_message(Feature.finance), reply_mode)
+                return
             finance_reply = await record_finance_message(user_id, text)
             if finance_reply is not None:
                 await send_reply(update, finance_reply, reply_mode)
@@ -147,6 +152,9 @@ async def _process_text(
             # так же, как с task, ведём как обычный чат вместо "не понял".
 
         elif intent == Intent.document:
+            if not has_feature(tariff, Feature.documents):
+                await send_reply(update, feature_unavailable_message(Feature.documents), reply_mode)
+                return
             # В отличие от task/finance, здесь нет случая "не смогла разобрать" —
             # generate_document всегда выдаёт какой-то черновик на подтверждение
             # (ошибки сети start_document_draft уже обрабатывает сама).
@@ -154,12 +162,18 @@ async def _process_text(
             return
 
         elif intent == Intent.relay:
+            if not has_feature(tariff, Feature.relay):
+                await send_reply(update, feature_unavailable_message(Feature.relay), reply_mode)
+                return
             # start_relay_draft сама отвечает пользователю в любом исходе (нет
             # @username, получатель не найден, всё ок) — ошибки сети тоже сама.
             await start_relay_draft(update, context, text)
             return
 
         elif intent == Intent.email:
+            if not has_feature(tariff, Feature.email):
+                await send_reply(update, feature_unavailable_message(Feature.email), reply_mode)
+                return
             # Аналогично relay — start_email_draft сама отвечает на любой исход.
             await start_email_draft(update, context, text)
             return

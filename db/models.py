@@ -41,6 +41,17 @@ class ReplyMode(str, enum.Enum):
     voice = "voice"
 
 
+class Tariff(str, enum.Enum):
+    """Тариф «виртуального офиса» (Фаза 28) — набор активных функций Арины,
+    самостоятельно выбираемый пользователем через /tariff, не привязан к оплате
+    (в MVP биллинга нет, см. CLAUDE.md). Полный список функций по тарифу —
+    core/tariffs.py, не здесь: этот enum описывает только сами уровни."""
+
+    secretary = "secretary"
+    accountant = "accountant"
+    trusted = "trusted"
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (UniqueConstraint("platform", "telegram_id", name="uq_users_platform_telegram_id"),)
@@ -73,6 +84,19 @@ class User(Base):
         SAEnum(ReplyMode, native_enum=False, length=8),
         default=ReplyMode.text,
         server_default="text",
+        nullable=False,
+    )
+    # Тариф «виртуального офиса» (Фаза 28, /tariff) — server_default='trusted'
+    # (самый полный набор функций) намеренно: уже существующие бета-пользователи не
+    # должны задним числом потерять доступ к тому, чем уже пользовались. Новым
+    # пользователям рекомендуемый тариф проставляется явно в коде онбординга по
+    # итогам сгенерированного приветствия (bot/handlers/onboarding.py) — этот
+    # server_default здесь только страховка на случай, если код онбординга почему-то
+    # не проставит тариф явно.
+    tariff: Mapped[Tariff] = mapped_column(
+        SAEnum(Tariff, native_enum=False, length=16),
+        default=Tariff.trusted,
+        server_default="trusted",
         nullable=False,
     )
 

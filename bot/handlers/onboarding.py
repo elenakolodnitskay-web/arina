@@ -3,8 +3,11 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from bot.states import OnboardingState
 from config import settings
+from core.tariffs import TARIFF_LABELS
 from db.models import EmailLog, Note, Task, Transaction, User
 from db.session import SessionLocal
+from llm.client import LLMUnavailableError
+from llm.onboarding_greeting import generate_onboarding_greeting
 
 HELP_TEXT = (
     "Вот что я умею:\n\n"
@@ -37,6 +40,8 @@ HELP_TEXT = (
     "обсуждали.\n\n"
     "— /voice_mode — переключить, как отвечать: голосом или текстом (по "
     "умолчанию текстом, независимо от того, как задан вопрос).\n\n"
+    "— /tariff — посмотреть или сменить тариф (набор доступных функций) — "
+    "свободно, в любую сторону, без оплаты.\n\n"
     "— /delete_my_data — полностью удалю все ваши данные."
 )
 
@@ -66,6 +71,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return OnboardingState.AWAITING_PROFILE
 
 
+_FALLBACK_GREETING = (
+    "Профиль сохранён. Теперь можно просто писать мне — как в обычном чате.\n\n"
+    "Если что — напишите /help, расскажу подробнее, что умею."
+)
+
+
 async def receive_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     telegram_id = update.effective_user.id
     profile_text = update.message.text
@@ -80,10 +91,28 @@ async def receive_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         user.username = update.effective_user.username
         session.commit()
 
-    await update.message.reply_text(
-        "Профиль сохранён. Теперь можно просто писать мне — как в обычном чате.\n\n"
-        "Если что — напишите /help, расскажу подробнее, что умею."
-    )
+    # Персонализированное приветствие (Фаза 28) — необязательный шаг поверх уже
+    # сохранённого профиля: если модель недоступна или вернула не то, что ожидали,
+    # онбординг всё равно должен завершиться (профиль уже сохранён выше), просто со
+    # старым статичным текстом вместо персонального. Рекомендованный тариф в этом
+    # случае не проставляется явно — остаётся server_default='trusted' (полный
+    # доступ), не более узкий по умолчанию, чем при успешной генерации.
+    try:
+        greeting, recommended_tariff = await generate_onboarding_greeting(profile_text)
+    except LLMUnavailableError:
+        await update.message.reply_text(_FALLBACK_GREETING)
+        return ConversationHandler.END
+    except (ValueError, KeyError):
+        await update.message.reply_text(_FALLBACK_GREETING)
+        return ConversationHandler.END
+
+    with SessionLocal() as session:
+        user = session.query(User).filter_by(telegram_id=telegram_id).one()
+        user.tariff = recommended_tariff
+        session.commit()
+
+    tariff_note = f"Тариф: «{TARIFF_LABELS[recommended_tariff]}» — переключить в любой момент можно через /tariff."
+    await update.message.reply_text(f"{greeting}\n\n{tariff_note}")
     return ConversationHandler.END
 
 

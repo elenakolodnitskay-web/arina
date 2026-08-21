@@ -4,6 +4,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from config import settings
+from core.tariffs import Feature, feature_unavailable_message, has_feature
 from db.models import ReplyMode, User
 from db.session import SessionLocal
 from llm.client import LLMUnavailableError
@@ -39,6 +40,12 @@ async def handle_voice_mode_choice(update: Update, context: ContextTypes.DEFAULT
         user = session.query(User).filter_by(telegram_id=telegram_id).one_or_none()
         if user is None:
             await query.answer("Не нашла ваш профиль — напишите /start.", show_alert=True)
+            return
+        # Переключение на текст не ограничено тарифом ни при каких условиях —
+        # ограничивать имеет смысл только включение голоса.
+        if mode == ReplyMode.voice and not has_feature(user.tariff, Feature.voice):
+            await query.answer()
+            await query.edit_message_text(feature_unavailable_message(Feature.voice))
             return
         user.reply_mode = mode
         session.commit()
