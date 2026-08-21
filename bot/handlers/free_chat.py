@@ -14,6 +14,7 @@ from bot.handlers.tasks_flow import (
     describe_schedule,
     describe_tasks_for_chat,
 )
+from bot.handlers.voice_reply import send_reply
 from config import settings
 from core.dialog_summary import get_recent_context
 from db.models import Context, Note, User
@@ -83,22 +84,23 @@ async def _process_text(
             return
         user_id = user.id
         profile_summary = user.profile_summary
+        reply_mode = user.reply_mode
 
     pending_task_id = context.user_data.pop(EDIT_PENDING_KEY, None)
     if pending_task_id is not None:
         try:
             task = await apply_task_edit(user_id, pending_task_id, text)
         except LLMUnavailableError as exc:
-            await update.message.reply_text(str(exc))
+            await send_reply(update, str(exc), reply_mode)
             return
         except (ValueError, KeyError):
-            await update.message.reply_text(
-                "Не поняла ответ модели — задача осталась без изменений, попробуйте ещё раз."
+            await send_reply(
+                update, "Не поняла ответ модели — задача осталась без изменений, попробуйте ещё раз.", reply_mode
             )
             return
 
         if task is None:
-            await update.message.reply_text("Не поняла новое время — задача осталась без изменений.")
+            await send_reply(update, "Не поняла новое время — задача осталась без изменений.", reply_mode)
         else:
             reply = f"Обновила: «{task.title}» — {describe_schedule(task)}."
             if getattr(task, "recurrence_dropped", False):
@@ -107,7 +109,7 @@ async def _process_text(
                     "если хотели просто сдвинуть время повтора, уточните формулировку, "
                     "например «каждый понедельник в 10:00»."
                 )
-            await update.message.reply_text(reply)
+            await send_reply(update, reply, reply_mode)
         return
 
     try:
@@ -123,19 +125,19 @@ async def _process_text(
         if intent == Intent.task:
             task = await create_task_from_text(user_id, text, classification)
             if task is not None:
-                await update.message.reply_text(f"Записала: «{task.title}» — {describe_schedule(task)}.")
+                await send_reply(update, f"Записала: «{task.title}» — {describe_schedule(task)}.", reply_mode)
                 return
             # Модель решила, что это задача, но не смогла распознать срок/повтор —
             # не показываем "не понял срок" на нейтральное сообщение, ведём как чат.
 
         elif intent == Intent.tasks_view:
-            await update.message.reply_text(await describe_tasks_for_chat(user_id))
+            await send_reply(update, await describe_tasks_for_chat(user_id), reply_mode)
             return
 
         elif intent == Intent.finance:
             finance_reply = await record_finance_message(user_id, text)
             if finance_reply is not None:
-                await update.message.reply_text(finance_reply)
+                await send_reply(update, finance_reply, reply_mode)
                 return
             # Модель решила, что это про деньги, но не смогла разобрать сумму/тип —
             # так же, как с task, ведём как обычный чат вместо "не понял".
@@ -162,10 +164,10 @@ async def _process_text(
         recent_context = get_recent_context(user_id, result.context)
         reply_text = await generate_reply(text, result.context, recent_context, profile_summary)
     except LLMUnavailableError as exc:
-        await update.message.reply_text(str(exc))
+        await send_reply(update, str(exc), reply_mode)
         return
     except (ValueError, KeyError):
-        await update.message.reply_text("Не поняла ответ модели — попробуйте переформулировать.")
+        await send_reply(update, "Не поняла ответ модели — попробуйте переформулировать.", reply_mode)
         return
 
     with SessionLocal() as session:
@@ -174,6 +176,10 @@ async def _process_text(
         session.commit()
         note_id = note.id
 
+    # Кнопки коррекции контекста доступны только вместе с текстовым ответом —
+    # send_reply молча отбрасывает reply_markup в голосовом режиме (см. её
+    # докстринг): нет смысла посылать активные inline-кнопки под голосовым
+    # сообщением, на которое и так можно ответить текстом, чтобы поправить.
     keyboard = InlineKeyboardMarkup(
         [
             [
@@ -182,7 +188,7 @@ async def _process_text(
             ]
         ]
     )
-    await update.message.reply_text(reply_text, reply_markup=keyboard)
+    await send_reply(update, reply_text, reply_mode, reply_markup=keyboard)
 
 
 async def handle_context_correction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

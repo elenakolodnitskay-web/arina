@@ -46,6 +46,7 @@ from bot.handlers.tasks_flow import (
     list_completed_tasks,
     list_tasks,
 )
+from bot.handlers.voice_reply import handle_voice_mode_choice, voice_mode_command
 from bot.states import OnboardingState
 from config import settings
 from core.scheduler import get_scheduler
@@ -70,6 +71,7 @@ BOT_COMMANDS = [
     BotCommand("task", "Поставить задачу или напоминание"),
     BotCommand("tasks", "Показать активные задачи"),
     BotCommand("tasks_done", "Показать выполненные задачи"),
+    BotCommand("voice_mode", "Отвечать голосом или текстом"),
     BotCommand("document", "Сгенерировать письмо или документ"),
     BotCommand("delete_my_data", "Удалить все мои данные"),
 ]
@@ -113,6 +115,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("task", create_task))
     application.add_handler(CommandHandler("tasks", list_tasks))
     application.add_handler(CommandHandler("tasks_done", list_completed_tasks))
+    application.add_handler(CommandHandler("voice_mode", voice_mode_command))
+    application.add_handler(CallbackQueryHandler(handle_voice_mode_choice, pattern=r"^voice_mode:"))
     application.add_handler(CallbackQueryHandler(handle_cancel_task, pattern=r"^cancel_task:"))
     application.add_handler(CallbackQueryHandler(handle_complete_task, pattern=r"^complete_task:"))
     application.add_handler(CallbackQueryHandler(handle_postpone_task, pattern=r"^postpone_task:"))

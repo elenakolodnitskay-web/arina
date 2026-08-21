@@ -29,6 +29,11 @@ class TransactionType(str, enum.Enum):
     income = "income"
 
 
+class ReplyMode(str, enum.Enum):
+    text = "text"
+    voice = "voice"
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (UniqueConstraint("platform", "telegram_id", name="uq_users_platform_telegram_id"),)
@@ -54,6 +59,15 @@ class User(Base):
     # про известные упрощения Фазы 14).
     balance: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     low_balance_threshold: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Голосом или текстом отвечать (/voice_mode) — переключается вручную,
+    # независимо от формата вопроса пользователя (можно спросить голосом и
+    # получить текст, и наоборот). По умолчанию text — прежнее поведение.
+    reply_mode: Mapped[ReplyMode] = mapped_column(
+        SAEnum(ReplyMode, native_enum=False, length=8),
+        default=ReplyMode.text,
+        server_default="text",
+        nullable=False,
+    )
 
 
 class Task(Base):
