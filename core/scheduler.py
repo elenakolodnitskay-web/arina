@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.jobstores.base import JobLookupError
@@ -82,4 +83,5 @@ async def send_reminder(task_id: int) -> None:
             task = session.get(Task, task_id)
             if task is not None:
                 task.status = TaskStatus.done
+                task.completed_at = datetime.now(timezone.utc)
                 session.commit()

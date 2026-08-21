@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -455,6 +455,7 @@ async def test_handle_complete_task_marks_done(db_session_factory, allowed_user)
     with db_session_factory() as session:
         task = session.get(Task, task_id)
         assert task.status == TaskStatus.done
+        assert task.completed_at is not None
 
     tasks_flow.cancel_task_reminder.assert_called_once_with(task_id)
     update.callback_query.edit_message_text.assert_awaited_once_with("Отметила как выполненное.")
@@ -508,3 +509,79 @@ async def test_list_tasks_shows_complete_button(db_session_factory, allowed_user
     keyboard = update.message.reply_text.await_args.kwargs["reply_markup"]
     button_texts = [button.text for row in keyboard.inline_keyboard for button in row]
     assert "Выполнено" in button_texts
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_shows_recently_completed_section(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        session.add(
+            Task(
+                user_id=user.id,
+                title="выполненная недавно",
+                context=Context.work,
+                status=TaskStatus.done,
+                due_at=datetime(2026, 8, 19, 10, 0, tzinfo=timezone.utc),
+                completed_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+        )
+        session.commit()
+
+    update, context = make_command_update(111, [])
+    await tasks_flow.list_tasks(update, context)
+
+    # Активных задач нет — первое сообщение про это, второе про выполненные.
+    calls = update.message.reply_text.await_args_list
+    assert "Активных задач нет." in calls[0].args[0]
+    assert "выполненная недавно" in calls[1].args[0]
+    assert "Выполнено за последние 7 дней" in calls[1].args[0]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_omits_old_completed_tasks(db_session_factory, allowed_user):
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        session.add(
+            Task(
+                user_id=user.id,
+                title="выполненная давно",
+                context=Context.work,
+                status=TaskStatus.done,
+                completed_at=datetime.now(timezone.utc) - timedelta(days=30),
+            )
+        )
+        session.commit()
+
+    update, context = make_command_update(111, [])
+    await tasks_flow.list_tasks(update, context)
+
+    update.message.reply_text.assert_awaited_once_with("Активных задач нет.")
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_omits_completed_tasks_without_completed_at(db_session_factory, allowed_user):
+    # Задачи, ставшие done ещё до появления поля completed_at (Фаза 25) — NULL,
+    # не попадают в список "недавно выполненных" за отсутствием даты.
+    with db_session_factory() as session:
+        user = User(telegram_id=111, onboarding_completed=True)
+        session.add(user)
+        session.flush()
+        session.add(
+            Task(
+                user_id=user.id,
+                title="выполненная до Фазы 25",
+                context=Context.work,
+                status=TaskStatus.done,
+                completed_at=None,
+            )
+        )
+        session.commit()
+
+    update, context = make_command_update(111, [])
+    await tasks_flow.list_tasks(update, context)
+
+    update.message.reply_text.assert_awaited_once_with("Активных задач нет.")

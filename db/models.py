@@ -69,6 +69,12 @@ class Task(Base):
         SAEnum(TaskStatus, native_enum=False, length=16), default=TaskStatus.active, nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Когда задача перешла в done (автоматически после отправки разового
+    # напоминания или вручную кнопкой «Выполнено») — используется, чтобы показать
+    # недавно выполненные в /tasks (Фаза 25). NULL для задач, ставших done ещё до
+    # появления этого поля — они не попадут в список "недавно выполненных" за
+    # отсутствием даты, это ожидаемо, не баг.
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Note(Base):

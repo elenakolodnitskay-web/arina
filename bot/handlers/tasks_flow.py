@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -13,6 +14,8 @@ from llm.classify import ClassificationResult, classify_message
 from llm.client import LLMUnavailableError
 
 EDIT_PENDING_KEY = "pending_edit_task_id"
+# За сколько дней показывать недавно выполненные задачи в /tasks (Фаза 25).
+RECENT_DONE_DAYS = 7
 
 
 def _format_local(due_at) -> str:
@@ -147,31 +150,47 @@ async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     with SessionLocal() as session:
         user = session.query(User).filter_by(telegram_id=telegram_id).one_or_none()
-        tasks = (
-            session.query(Task)
-            .filter_by(user_id=user.id, status=TaskStatus.active)
-            .order_by(Task.created_at)
-            .all()
-            if user is not None
-            else []
-        )
+
+        if user is None:
+            tasks = []
+            recent_done = []
+        else:
+            tasks = (
+                session.query(Task)
+                .filter_by(user_id=user.id, status=TaskStatus.active)
+                .order_by(Task.created_at)
+                .all()
+            )
+            cutoff = datetime.now(timezone.utc) - timedelta(days=RECENT_DONE_DAYS)
+            recent_done = (
+                session.query(Task)
+                .filter_by(user_id=user.id, status=TaskStatus.done)
+                .filter(Task.completed_at >= cutoff)
+                .order_by(Task.completed_at.desc())
+                .all()
+            )
 
         if not tasks:
             await update.message.reply_text("Активных задач нет.")
-            return
-
-        for task in tasks:
-            when = _format_local(task.due_at) if task.due_at else task.recurrence_rule
-            keyboard = InlineKeyboardMarkup(
-                [
+        else:
+            for task in tasks:
+                when = _format_local(task.due_at) if task.due_at else task.recurrence_rule
+                keyboard = InlineKeyboardMarkup(
                     [
-                        InlineKeyboardButton("Изменить", callback_data=f"edit_task:{task.id}"),
-                        InlineKeyboardButton("Выполнено", callback_data=f"complete_task:{task.id}"),
-                        InlineKeyboardButton("Отменить", callback_data=f"cancel_task:{task.id}"),
+                        [
+                            InlineKeyboardButton("Изменить", callback_data=f"edit_task:{task.id}"),
+                            InlineKeyboardButton("Выполнено", callback_data=f"complete_task:{task.id}"),
+                            InlineKeyboardButton("Отменить", callback_data=f"cancel_task:{task.id}"),
+                        ]
                     ]
-                ]
+                )
+                await update.message.reply_text(f"{task.title} — {when}", reply_markup=keyboard)
+
+        if recent_done:
+            lines = [f"✅ {task.title} — {_format_local(task.completed_at)}" for task in recent_done]
+            await update.message.reply_text(
+                f"Выполнено за последние {RECENT_DONE_DAYS} дней:\n" + "\n".join(lines)
             )
-            await update.message.reply_text(f"{task.title} — {when}", reply_markup=keyboard)
 
 
 async def handle_edit_task_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -210,6 +229,7 @@ async def handle_complete_task(update: Update, context: ContextTypes.DEFAULT_TYP
             return
 
         task.status = TaskStatus.done
+        task.completed_at = datetime.now(timezone.utc)
         session.commit()
 
     cancel_task_reminder(task_id)

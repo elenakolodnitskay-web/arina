@@ -116,6 +116,7 @@ async def test_send_reminder_marks_one_off_task_done_after_sending(db_session_fa
     with db_session_factory() as session:
         task = session.get(Task, task_id)
         assert task.status == TaskStatus.done
+        assert task.completed_at is not None
 
 
 @pytest.mark.asyncio
